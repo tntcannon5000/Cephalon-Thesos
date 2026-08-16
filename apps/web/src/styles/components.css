@@ -727,6 +727,7 @@ form.composer-shell {
 
 .message.assistant {
   margin-right: auto;
+  margin-bottom: 20px;
   padding: 0 4px 5px 16px;
   border-left: 1px solid var(--veris-dim);
 }
@@ -734,6 +735,7 @@ form.composer-shell {
 .message header {
   display: flex;
   align-items: center;
+  gap: 8px;
   margin-bottom: 6px;
   color: var(--muted);
   font-size: 9px;
@@ -747,6 +749,25 @@ form.composer-shell {
 
 .message.assistant header {
   color: var(--veris);
+}
+
+.message-time {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 400;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 150ms ease, transform 180ms ease;
+}
+
+.message.user .message-time {
+  order: -1;
+}
+
+.message:hover .message-time,
+.message:focus-within .message-time {
+  opacity: 0.8;
+  transform: translateY(0);
 }
 
 .message-actions {
@@ -774,8 +795,15 @@ form.composer-shell {
   transition: color 150ms ease, background 150ms ease;
 }
 
+.message.assistant .message-actions {
+  right: auto;
+  left: 12px;
+}
+
 .message.user:hover .message-actions,
-.message.user:focus-within .message-actions {
+.message.user:focus-within .message-actions,
+.message.assistant:hover .message-actions,
+.message.assistant:focus-within .message-actions {
   opacity: 1;
   transform: translateY(0);
 }
@@ -784,6 +812,13 @@ form.composer-shell {
 .message-actions button:focus-visible {
   color: var(--veris-text);
   background: var(--focus-inset);
+}
+
+.message-actions button:disabled {
+  color: var(--muted);
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 .message p {
@@ -849,6 +884,10 @@ form.composer-shell {
 
 .thesos-activity.is-tool .activity-icon {
   color: var(--amber);
+}
+
+.thesos-activity.is-stopped {
+  color: var(--muted);
 }
 
 .intro-sequence {
@@ -1161,6 +1200,11 @@ form.composer-shell {
     position: static;
     min-height: 23px;
     margin-top: 2px;
+    opacity: 0.72;
+    transform: none;
+  }
+
+  .message-time {
     opacity: 0.72;
     transform: none;
   }

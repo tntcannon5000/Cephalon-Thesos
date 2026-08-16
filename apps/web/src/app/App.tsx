@@ -136,6 +136,8 @@ function ChatPage() {
                 {chat.activeConversation ? (
               <ConversationView
                 conversation={chat.activeConversation}
+                branchingDisabled={chat.running || chat.activeConversation.terminated}
+                onBranch={chat.branchFromMessage}
                 onEdit={chat.beginEdit}
                 onRevealComplete={chat.completeReveal}
               />

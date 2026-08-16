@@ -5,6 +5,7 @@ import {
   CircleNotch,
   CirclesThree,
   Copy,
+  GitBranch,
   PencilSimple,
   Snowflake,
   Sparkle,
@@ -18,10 +19,13 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentActivity, ChatMessage, Conversation } from "../features/chat/types";
+import { formatMessageTimestamp } from "../features/chat/timestamps";
 import { useTheme } from "../features/theme/ThemeContext";
 
 interface ConversationViewProps {
   conversation: Conversation;
+  branchingDisabled: boolean;
+  onBranch: (messageId: string) => void;
   onEdit: (message: ChatMessage) => void;
   onRevealComplete: (messageId: string) => void;
 }
@@ -39,16 +43,17 @@ function AssistantResponse({
   const [visibleWordCount, setVisibleWordCount] = useState(() =>
     message.reveal === true ? 0 : words.length,
   );
+  const renderedWordCount = message.reveal === false ? words.length : visibleWordCount;
   const completionReported = useRef(false);
 
   useEffect(() => {
-    if (!progressive || visibleWordCount >= words.length) return;
+    if (message.reveal === false || !progressive || visibleWordCount >= words.length) return;
     const timer = window.setTimeout(
       () => setVisibleWordCount((current) => Math.min(current + 1, words.length)),
       reducedMotion ? 0 : 34,
     );
     return () => window.clearTimeout(timer);
-  }, [progressive, reducedMotion, visibleWordCount, words.length]);
+  }, [message.reveal, progressive, reducedMotion, visibleWordCount, words.length]);
 
   useEffect(() => {
     if (
@@ -66,7 +71,7 @@ function AssistantResponse({
   return (
     <>
       <p className="streaming-response" aria-label={message.content}>
-        {words.slice(0, visibleWordCount).map((word, index) => (
+        {words.slice(0, renderedWordCount).map((word, index) => (
           <motion.span
             className="streamed-word"
             aria-hidden="true"
@@ -81,7 +86,7 @@ function AssistantResponse({
           </motion.span>
         ))}
       </p>
-      {message.state === "streaming" || visibleWordCount < words.length ? (
+      {message.state === "streaming" || renderedWordCount < words.length ? (
         <i className="response-caret" aria-hidden="true" />
       ) : null}
     </>
@@ -91,6 +96,20 @@ function AssistantResponse({
 function ActivityIndicator({ activity }: { activity: AgentActivity }) {
   const reducedMotion = useReducedMotion();
   const { theme } = useTheme();
+  if (activity.kind === "stopped") {
+    return (
+      <motion.div
+        className="thesos-activity is-stopped"
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0 }}
+        role="status"
+        aria-label={activity.label}
+      >
+        <span>{activity.label}</span>
+      </motion.div>
+    );
+  }
   const themedIcon = {
     sigil: SpinnerGap,
     orbit: CircleNotch,
@@ -152,6 +171,8 @@ function ActivityIndicator({ activity }: { activity: AgentActivity }) {
 
 export function ConversationView({
   conversation,
+  branchingDisabled,
+  onBranch,
   onEdit,
   onRevealComplete,
 }: ConversationViewProps) {
@@ -208,7 +229,16 @@ export function ConversationView({
               exit={{ opacity: 0, y: -8, height: 0 }}
               transition={{ duration: 0.28 }}
             >
-              <header><span>{message.role === "assistant" ? "THESOS" : "TENNO"}</span></header>
+              <header>
+                <span>{message.role === "assistant" ? "THESOS" : "TENNO"}</span>
+                <time
+                  className="message-time"
+                  dateTime={message.createdAt}
+                  title={new Date(message.createdAt).toLocaleString()}
+                >
+                  {formatMessageTimestamp(message.createdAt)}
+                </time>
+              </header>
               {message.role === "user" ? (
                 <>
                   <div className="message-bubble"><p>{message.content}</p></div>
@@ -236,12 +266,41 @@ export function ConversationView({
                   </footer>
                 </>
               ) : (
-                <div className="assistant-message-copy">
-                  <AssistantResponse message={message} onRevealComplete={onRevealComplete} />
-                  {message.state === "failed" ? (
-                    <small><WarningCircle size={14} weight="thin" /> Archive link interrupted</small>
-                  ) : null}
-                </div>
+                <>
+                  <div className="assistant-message-copy">
+                    <AssistantResponse message={message} onRevealComplete={onRevealComplete} />
+                    {message.state === "failed" ? (
+                      <small><WarningCircle size={14} weight="thin" /> Archive link interrupted</small>
+                    ) : null}
+                  </div>
+                  <footer className="message-actions assistant-actions">
+                    <button
+                      type="button"
+                      onClick={() => void copyMessage(message)}
+                      aria-label="Copy this response"
+                      title="Copy this response"
+                    >
+                      {copiedMessageId === message.id ? (
+                        <Check size={14} weight="thin" />
+                      ) : (
+                        <Copy size={14} weight="thin" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onBranch(message.id)}
+                      disabled={branchingDisabled || message.state !== "complete"}
+                      aria-label="Branch from this response"
+                      title={
+                        branchingDisabled
+                          ? "Finish or stop the current response before branching"
+                          : "Branch from this response"
+                      }
+                    >
+                      <GitBranch size={14} weight="thin" />
+                    </button>
+                  </footer>
+                </>
               )}
             </motion.article>
               ))}

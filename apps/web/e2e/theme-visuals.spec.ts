@@ -4,6 +4,8 @@ const NEW_THEMES = [
   "zariman-residuum",
   "vallis-survey",
   "deimos-twinlight",
+  "star-chart",
+  "void-darkness",
   "sentient-eclipse",
 ] as const;
 
@@ -69,7 +71,7 @@ test("new theme scenes animate and keep the primary surface in frame", async ({ 
   await page.waitForTimeout(250);
   const picker = page.getByRole("dialog", { name: "Interface theme" });
   await expect(picker).toBeVisible();
-  await expect(picker.getByRole("button")).toHaveCount(8);
+  await expect(picker.locator(".theme-option")).toHaveCount(9);
   const pickerBounds = await picker.boundingBox();
   const viewport = page.viewportSize();
   expect(pickerBounds).not.toBeNull();

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 
 import type { Conversation } from "../features/chat/types";
+import { formatMessageTimestamp } from "../features/chat/timestamps";
 import { ThemeProvider } from "../features/theme/ThemeProvider";
 import { ConversationView } from "./ConversationView";
 
@@ -34,11 +35,15 @@ function renderConversation(
   value: Conversation,
   onEdit = vi.fn(),
   onRevealComplete = vi.fn(),
+  onBranch = vi.fn(),
+  branchingDisabled = false,
 ) {
   return render(
     <ThemeProvider>
       <ConversationView
+        branchingDisabled={branchingDisabled}
         conversation={value}
+        onBranch={onBranch}
         onEdit={onEdit}
         onRevealComplete={onRevealComplete}
       />
@@ -73,6 +78,58 @@ describe("ConversationView", () => {
 
     expect(onEdit).toHaveBeenCalledWith(conversation.messages[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(conversation.messages[0]!.content));
+  });
+
+  it("copies and branches from a completed assistant response", async () => {
+    const onBranch = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderConversation(conversation, vi.fn(), vi.fn(), onBranch);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy this response" }));
+    fireEvent.click(screen.getByRole("button", { name: "Branch from this response" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("The answer belongs here."));
+    expect(onBranch).toHaveBeenCalledWith("assistant-1");
+  });
+
+  it("blocks branching when the conversation safety state is terminated", () => {
+    renderConversation({ ...conversation, terminated: true }, vi.fn(), vi.fn(), vi.fn(), true);
+
+    expect(screen.getByRole("button", { name: "Branch from this response" })).toBeDisabled();
+  });
+
+  it("shows time only today and date plus time for older messages", () => {
+    const reference = new Date(2026, 7, 16, 12, 0);
+    const today = new Date(2026, 7, 16, 9, 30);
+    const yesterday = new Date(2026, 7, 15, 9, 30);
+
+    expect(formatMessageTimestamp(today.toISOString(), reference)).toBe(
+      today.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    );
+    expect(formatMessageTimestamp(yesterday.toISOString(), reference)).toBe(
+      yesterday.toLocaleString([], {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    );
+  });
+
+  it("renders stopped activity without an animated activity icon", () => {
+    renderConversation({
+      ...conversation,
+      activity: { kind: "stopped", label: "Stopped" },
+    });
+
+    const activity = screen.getByRole("status", { name: "Stopped" });
+    expect(activity).toHaveClass("is-stopped");
+    expect(activity.querySelector(".activity-icon")).toBeNull();
   });
 
   it("shows contextual agent activity", () => {

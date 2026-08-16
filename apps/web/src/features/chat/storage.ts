@@ -5,6 +5,37 @@ import type { AgentActivity, Conversation } from "./types";
 const CONVERSATIONS_KEY = "thesos.conversations.v1";
 const LEGACY_CONVERSATIONS_KEY = "veris.conversations.v1";
 
+export function createConversationBranch(
+  source: Conversation,
+  throughMessageId: string,
+  idFactory: () => string = () => crypto.randomUUID(),
+  createdAt = new Date().toISOString(),
+): Conversation | null {
+  if (source.terminated) return null;
+  const branchIndex = source.messages.findIndex(
+    (message) =>
+      message.id === throughMessageId &&
+      message.role === "assistant" &&
+      message.state === "complete",
+  );
+  if (branchIndex < 0) return null;
+
+  return {
+    id: idFactory(),
+    title: source.title,
+    titleState: source.titleState,
+    pinned: false,
+    messages: source.messages.slice(0, branchIndex + 1).map((message) => ({
+      ...message,
+      id: idFactory(),
+      state: "complete",
+      reveal: false,
+    })),
+    updatedAt: createdAt,
+    terminated: false,
+  };
+}
+
 function readConversations(): Conversation[] {
   try {
     const raw =

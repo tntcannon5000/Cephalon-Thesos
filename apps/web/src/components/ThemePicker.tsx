@@ -75,7 +75,12 @@ export function ThemePicker({ onClose }: ThemePickerProps) {
                           className="theme-preview"
                           data-profile={theme.scene.profile}
                           style={{
-                            background: theme.palette.background,
+                            backgroundColor: theme.palette.background,
+                            backgroundImage: theme.backdrop
+                              ? `linear-gradient(${theme.backdrop.overlay}, ${theme.backdrop.overlay}), url("${theme.backdrop.image}")`
+                              : undefined,
+                            backgroundPosition: theme.backdrop?.position,
+                            backgroundSize: theme.backdrop ? "cover" : undefined,
                             borderColor: theme.palette.lineStrong,
                             color: theme.palette.accent,
                             "--preview-surface": theme.palette.surfaceRaised,

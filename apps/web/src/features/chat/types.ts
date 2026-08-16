@@ -1,7 +1,7 @@
 export type MessageRole = "user" | "assistant";
 export type MessageState = "complete" | "streaming" | "failed";
 export type ConversationTitleState = "pending" | "generated";
-export type AgentActivityKind = "thinking" | "tool" | "composing" | "connecting";
+export type AgentActivityKind = "thinking" | "tool" | "composing" | "connecting" | "stopped";
 
 export interface AgentActivity {
   kind: AgentActivityKind;

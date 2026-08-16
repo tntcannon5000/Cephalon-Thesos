@@ -8,6 +8,20 @@
   background: var(--background);
 }
 
+.app-shell::before {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--theme-backdrop-overlay), var(--theme-backdrop-overlay)),
+    var(--theme-backdrop-image);
+  background-position: center, var(--theme-backdrop-position);
+  background-repeat: no-repeat;
+  background-size: cover;
+  content: "";
+  pointer-events: none;
+}
+
 .archive-scene {
   position: fixed;
   inset: 0;

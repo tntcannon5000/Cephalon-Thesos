@@ -44,6 +44,11 @@ function applyTheme(theme: ThemeDefinition) {
     "--scrim": palette.scrim,
     "--shadow": palette.shadow,
     "--edge-duration": theme.motion.edgeDuration,
+    "--theme-backdrop-image": theme.backdrop
+      ? `url("${theme.backdrop.image}")`
+      : "none",
+    "--theme-backdrop-overlay": theme.backdrop?.overlay ?? "transparent",
+    "--theme-backdrop-position": theme.backdrop?.position ?? "center center",
   };
 
   Object.entries(properties).forEach(([property, value]) => root.style.setProperty(property, value));

@@ -18,12 +18,11 @@ from veris_api.config import get_settings
 from veris_api.db.repository import (
     ConversationTerminatedError,
     MessageNotFoundError,
-    add_event,
     create_run,
     edit_message,
     events_after,
     get_run_for_session,
-    set_run_status,
+    mark_run_cancelled,
 )
 from veris_api.db.session import dispose_engine, get_engine
 from veris_api.developer_logs import configure_developer_logging, get_developer_log_buffer
@@ -271,9 +270,8 @@ def create_app() -> FastAPI:
     ) -> Response:
         if veris_session is None or await get_run_for_session(run_id, veris_session) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        cancel_run(run_id)
-        await set_run_status(run_id, "cancelled")
-        await add_event(run_id, "run.cancelled", {})
+        await cancel_run(run_id)
+        await mark_run_cancelled(run_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.patch(

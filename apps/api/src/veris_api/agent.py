@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -178,6 +179,13 @@ async def run_agent_workflow(run_id: str) -> None:
             extra={"developer_layer": "ai"},
         )
         await persist_turn_result(run_id, message_id, result.output)
+    except asyncio.CancelledError:
+        logger.info(
+            "Provider execution cancelled for run %s",
+            run_id,
+            extra={"developer_layer": "ai"},
+        )
+        raise
     except Exception:
         logger.exception(
             "Model execution failed for run %s",

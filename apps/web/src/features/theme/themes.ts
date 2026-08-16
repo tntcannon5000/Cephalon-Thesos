@@ -1,7 +1,10 @@
+import starChartBackground from "../../assets/themes/star-chart.png";
+
 export type ThemeId =
   | "murmur-labyrinth"
   | "origin-archive"
   | "corpus-relay"
+  | "star-chart"
   | "zariman-residuum"
   | "vallis-survey"
   | "deimos-twinlight"
@@ -88,6 +91,11 @@ export interface ThemeDefinition {
     activity: ActivityMotion;
     edge: EdgeMotion;
     edgeDuration: string;
+  };
+  backdrop?: {
+    image: string;
+    overlay: string;
+    position: string;
   };
 }
 
@@ -239,6 +247,59 @@ export const themes: ThemeDefinition[] = [
     motion: { activity: "signal", edge: "pulse", edgeDuration: "5.6s" },
   },
   {
+    id: "star-chart",
+    name: "Star Chart",
+    description: "The Origin System beneath a quiet navigation veil.",
+    colorScheme: "dark",
+    palette: {
+      background: "#02060a",
+      surface: "rgba(5, 12, 18, 0.9)",
+      surfaceSolid: "#071018",
+      surfaceRaised: "#0b1721",
+      surfaceHover: "#102330",
+      sidebar: "rgba(2, 7, 11, 0.95)",
+      header: "rgba(2, 6, 10, 0.88)",
+      line: "rgba(139, 181, 207, 0.24)",
+      lineStrong: "rgba(157, 201, 227, 0.5)",
+      text: "#eef6fa",
+      textSoft: "#d7e6ed",
+      muted: "#879da8",
+      mutedDim: "#566b75",
+      accent: "#78c9f2",
+      assistant: "#b9e7fa",
+      accentDim: "#467f9d",
+      secondary: "#d99a53",
+      danger: "#e17d79",
+      userBubble: "rgba(10, 22, 31, 0.84)",
+      focusInset: "rgba(120, 201, 242, 0.14)",
+      selectionText: "#031019",
+      scrim: "rgba(0, 3, 7, 0.76)",
+      shadow: "rgba(0, 0, 0, 0.6)",
+    },
+    scene: {
+      background: 0x02060a,
+      fog: 0x02060a,
+      particlePrimary: 0x78c9f2,
+      particleSecondary: 0xd99a53,
+      rails: 0x8bb5cf,
+      particleCount: 120,
+      particleOpacity: 0.2,
+      particleSize: 0.01,
+      railCount: 4,
+      railOpacity: 0.04,
+      driftSpeed: 0.002,
+      railAmplitude: 0.025,
+      fogDensity: 0.062,
+      profile: "archive",
+    },
+    motion: { activity: "orbit", edge: "drift", edgeDuration: "10s" },
+    backdrop: {
+      image: starChartBackground,
+      overlay: "rgba(0, 6, 12, 0.64)",
+      position: "center center",
+    },
+  },
+  {
     id: "zariman-residuum",
     name: "Zariman Residuum",
     description: "A weathered colony ship split by quiet Void light.",
@@ -385,16 +446,16 @@ export const themes: ThemeDefinition[] = [
   {
     id: "void-darkness",
     name: "Void Darkness",
-    description: "A lightless threshold traced in cold Void blue.",
+    description: "Absolute OLED black traced in cold Void blue.",
     colorScheme: "dark",
     palette: {
-      background: "#010207",
-      surface: "rgba(4, 7, 16, 0.94)",
-      surfaceSolid: "#040710",
-      surfaceRaised: "#080d1a",
-      surfaceHover: "#0c1426",
-      sidebar: "rgba(1, 3, 9, 0.97)",
-      header: "rgba(1, 2, 7, 0.95)",
+      background: "#000000",
+      surface: "#000000",
+      surfaceSolid: "#000000",
+      surfaceRaised: "#000000",
+      surfaceHover: "#000000",
+      sidebar: "#000000",
+      header: "#000000",
       line: "rgba(103, 147, 221, 0.19)",
       lineStrong: "rgba(119, 164, 235, 0.42)",
       text: "#eef4ff",
@@ -406,15 +467,15 @@ export const themes: ThemeDefinition[] = [
       accentDim: "#3d5f9e",
       secondary: "#7564d8",
       danger: "#e1788d",
-      userBubble: "rgba(8, 14, 29, 0.82)",
+      userBubble: "#000000",
       focusInset: "rgba(105, 156, 255, 0.13)",
       selectionText: "#02040a",
-      scrim: "rgba(0, 1, 5, 0.8)",
+      scrim: "rgba(0, 0, 0, 0.88)",
       shadow: "rgba(0, 0, 0, 0.78)",
     },
     scene: {
-      background: 0x010207,
-      fog: 0x010207,
+      background: 0x000000,
+      fog: 0x000000,
       particlePrimary: 0x699cff,
       particleSecondary: 0x7564d8,
       rails: 0x8cb7ff,

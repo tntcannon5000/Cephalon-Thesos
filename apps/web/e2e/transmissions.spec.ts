@@ -175,6 +175,179 @@ test("a persisted conversation can submit a follow-up turn", async ({ page }) =>
   expect(submittedHistory[1]?.id).toBe(legacyAssistantId);
 });
 
+test("stopping before an answer cancels the run and leaves an editable stopped turn", async ({
+  page,
+}) => {
+  const createdAt = "2026-08-16T10:00:00.000Z";
+  let cancellationRequests = 0;
+  await page.route("**/api/v1/runs", (route) =>
+    route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        run_id: "run-stop-empty",
+        event_url: "/api/v1/runs/run-stop-empty/events",
+        cancel_url: "/api/v1/runs/run-stop-empty",
+      }),
+    }),
+  );
+  await page.route("**/api/v1/runs/run-stop-empty/events", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: `data: ${JSON.stringify({
+        event_id: 1,
+        run_id: "run-stop-empty",
+        type: "status.changed",
+        created_at: createdAt,
+        payload: { kind: "thinking", label: "Thinking" },
+      })}\n\n`,
+    }),
+  );
+  await page.route("**/api/v1/runs/run-stop-empty", (route) => {
+    cancellationRequests += 1;
+    return route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Message Thesos" });
+  await composer.fill("Explain damage attenuation");
+  await composer.press("Enter");
+  await expect(page.getByRole("status", { name: "Thinking" })).toBeVisible();
+  await page.getByRole("button", { name: "Stop response" }).click();
+
+  await expect(page.getByRole("status", { name: "Stopped" })).toBeVisible();
+  await expect.poll(() => cancellationRequests).toBe(1);
+  await expect(composer).toBeEnabled();
+  await page.getByRole("button", { name: "Edit this message" }).click();
+  await expect(page.getByText("Editing this turn will remove everything after it")).toBeVisible();
+});
+
+test("stopping during an answer finalizes the visible partial response", async ({ page }) => {
+  const createdAt = "2026-08-16T10:00:00.000Z";
+  let cancelled = false;
+  await page.route("**/api/v1/runs", (route) =>
+    route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        run_id: "run-stop-partial",
+        event_url: "/api/v1/runs/run-stop-partial/events",
+        cancel_url: "/api/v1/runs/run-stop-partial",
+      }),
+    }),
+  );
+  const events = [
+    {
+      event_id: 1,
+      run_id: "run-stop-partial",
+      type: "answer.started",
+      created_at: createdAt,
+      payload: {},
+    },
+    {
+      event_id: 2,
+      run_id: "run-stop-partial",
+      type: "answer.snapshot",
+      created_at: createdAt,
+      payload: { text: "Damage attenuation changes incoming damage" },
+    },
+  ];
+  await page.route("**/api/v1/runs/run-stop-partial/events", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+    }),
+  );
+  await page.route("**/api/v1/runs/run-stop-partial", (route) => {
+    cancelled = true;
+    return route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Message Thesos" });
+  await composer.fill("Explain damage attenuation");
+  await composer.press("Enter");
+  const response = page.getByLabel("Damage attenuation changes incoming damage");
+  await expect(response).toBeVisible();
+  await page.getByRole("button", { name: "Stop response" }).click();
+
+  await expect.poll(() => cancelled).toBe(true);
+  await expect(response.locator(".streamed-word")).toHaveCount(5);
+  await expect(response.locator("xpath=following-sibling::*[contains(@class, 'response-caret')]")).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Stopped" })).toHaveCount(0);
+  await expect(response.locator("xpath=ancestor::article")).toHaveClass(/complete/);
+});
+
+test("branching creates a truncated conversation with independent IDs", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "thesos.conversations.v1",
+      JSON.stringify([
+        {
+          id: "source-chat",
+          title: "Damage attenuation",
+          titleState: "generated",
+          pinned: false,
+          updatedAt: "2026-08-16T10:02:00.000Z",
+          terminated: false,
+          messages: [
+            {
+              id: "source-user-1",
+              role: "user",
+              content: "First question",
+              createdAt: "2026-08-16T10:00:00.000Z",
+              state: "complete",
+            },
+            {
+              id: "source-assistant-1",
+              role: "assistant",
+              content: "First answer.",
+              createdAt: "2026-08-16T10:00:01.000Z",
+              state: "complete",
+            },
+            {
+              id: "source-user-2",
+              role: "user",
+              content: "Later question",
+              createdAt: "2026-08-16T10:01:00.000Z",
+              state: "complete",
+            },
+            {
+              id: "source-assistant-2",
+              role: "assistant",
+              content: "Later answer.",
+              createdAt: "2026-08-16T10:01:01.000Z",
+              state: "complete",
+            },
+          ],
+        },
+      ]),
+    );
+  });
+
+  await page.goto("/");
+  const firstResponse = page.locator(".message.assistant").first();
+  await firstResponse.hover();
+  await firstResponse.getByRole("button", { name: "Branch from this response" }).click();
+
+  await expect(page.getByText("Later question")).toHaveCount(0);
+  const stored = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("thesos.conversations.v1") ?? "[]") as Array<{
+      id: string;
+      messages: Array<{ id: string }>;
+    }>,
+  );
+  expect(stored).toHaveLength(2);
+  const branch = stored.find((conversation) => conversation.id !== "source-chat");
+  expect(branch?.messages).toHaveLength(2);
+  expect(branch?.messages.map((message) => message.id)).not.toEqual([
+    "source-user-1",
+    "source-assistant-1",
+  ]);
+});
+
 test("transmissions can be pinned, unpinned, and deleted from their context menu", async ({
   page,
 }) => {
@@ -237,7 +410,7 @@ test("theme selection changes the interface and survives reload", async ({ page 
   if (await openMenu.isVisible()) await openMenu.click();
 
   await page.getByRole("button", { name: "Theme", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Interface theme" }).getByRole("button")).toHaveCount(8);
+  await expect(page.getByRole("dialog", { name: "Interface theme" }).locator(".theme-option")).toHaveCount(9);
   await page.getByRole("button", { name: /Vallis Survey/ }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "vallis-survey");

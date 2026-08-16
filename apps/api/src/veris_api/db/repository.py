@@ -187,6 +187,42 @@ async def set_run_status(
         await session.execute(update(AgentRun).where(AgentRun.id == run_id).values(**values))
 
 
+async def mark_run_cancelled(run_id: str) -> bool:
+    async with get_session_factory()() as session, session.begin():
+        run = await session.get(AgentRun, run_id)
+        if run is None or run.status not in {"accepted", "working"}:
+            return False
+
+        latest_snapshot = await session.scalar(
+            select(AgentEvent)
+            .where(
+                AgentEvent.run_id == run_id,
+                AgentEvent.event_type == "answer.snapshot",
+            )
+            .order_by(AgentEvent.sequence.desc())
+            .limit(1)
+        )
+        partial_answer = latest_snapshot.payload.get("text") if latest_snapshot else None
+        run.status = "cancelled"
+        run.updated_at = datetime.now(UTC)
+        if isinstance(partial_answer, str) and partial_answer:
+            run.answer_text = partial_answer
+
+        current = await session.scalar(
+            select(func.max(AgentEvent.sequence)).where(AgentEvent.run_id == run_id)
+        )
+        session.add(
+            AgentEvent(
+                run_id=run_id,
+                sequence=(current or 0) + 1,
+                event_type="run.cancelled",
+                payload={"partial_answer": partial_answer or ""},
+                created_at=datetime.now(UTC),
+            )
+        )
+        return True
+
+
 async def set_message_safety(message_id: str, safety_action: str) -> None:
     async with get_session_factory()() as session, session.begin():
         await session.execute(

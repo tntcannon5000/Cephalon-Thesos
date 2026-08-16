@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, cancelRun, createRun, editMessage, subscribeToRun } from "../../transport/runs";
-import { useConversationStore } from "./storage";
+import { createConversationBranch, useConversationStore } from "./storage";
 import type {
   AgentActivity,
   AgentActivityKind,
@@ -23,7 +23,13 @@ function payloadText(value: unknown, fallback: string): string {
 }
 
 function eventActivity(event: RunEvent): AgentActivity {
-  const allowedKinds: AgentActivityKind[] = ["thinking", "tool", "composing", "connecting"];
+  const allowedKinds: AgentActivityKind[] = [
+    "thinking",
+    "tool",
+    "composing",
+    "connecting",
+    "stopped",
+  ];
   const candidateKind = payloadText(event.payload.kind, "thinking") as AgentActivityKind;
   const kind = allowedKinds.includes(candidateKind) ? candidateKind : "thinking";
   const activity: AgentActivity = {
@@ -34,20 +40,59 @@ function eventActivity(event: RunEvent): AgentActivity {
   return activity;
 }
 
+interface ActiveRun {
+  conversationId: string;
+  messageId: string;
+  cancelUrl: string | null;
+  cancelRequested: boolean;
+}
+
+function eventTimestamp(event: RunEvent): string {
+  return Number.isNaN(Date.parse(event.created_at)) ? now() : event.created_at;
+}
+
+function finalizeCancelledConversation(
+  conversation: Conversation,
+  messageId: string,
+  stoppedAt: string,
+): Conversation {
+  const responseId = assistantId(messageId);
+  const response = conversation.messages.find((message) => message.id === responseId);
+  const hasPartialAnswer = Boolean(response?.content.trim());
+
+  return {
+    ...conversation,
+    messages: hasPartialAnswer
+      ? conversation.messages.map((message) =>
+          message.id === responseId
+            ? { ...message, state: "complete", reveal: false }
+            : message,
+        )
+      : conversation.messages.filter((message) => message.id !== responseId),
+    activity: hasPartialAnswer ? undefined : { kind: "stopped", label: "Stopped" },
+    updatedAt: stoppedAt,
+  };
+}
+
 export function useChatController(displayName: string | null = null) {
   const store = useConversationStore();
   const [draft, setDraft] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const cleanupStream = useRef<(() => void) | null>(null);
-  const cancelUrl = useRef<string | null>(null);
+  const activeRun = useRef<ActiveRun | null>(null);
 
   useEffect(() => () => cleanupStream.current?.(), []);
 
   const updateFromEvent = useCallback(
-    (conversationId: string, messageId: string, event: RunEvent) => {
-      const eventTime = now();
+    (runContext: ActiveRun, event: RunEvent) => {
+      if (runContext.cancelRequested && event.type !== "run.cancelled") return;
+      const { conversationId, messageId } = runContext;
+      const eventTime = eventTimestamp(event);
       store.updateConversation(conversationId, (conversation) => {
+        if (event.type === "run.cancelled") {
+          return finalizeCancelledConversation(conversation, messageId, eventTime);
+        }
         const messages = [...conversation.messages];
         const responseId = assistantId(messageId);
         const responseIndex = messages.findIndex((message) => message.id === responseId);
@@ -185,8 +230,11 @@ export function useChatController(displayName: string | null = null) {
           event.type,
         )
       ) {
-        setRunning(false);
-        cancelUrl.current = null;
+        if (activeRun.current === runContext) {
+          activeRun.current = null;
+          cleanupStream.current = null;
+          setRunning(false);
+        }
       }
     },
     [store],
@@ -233,6 +281,13 @@ export function useChatController(displayName: string | null = null) {
       setDraft("");
       setEditingMessageId(null);
       setRunning(true);
+      const runContext: ActiveRun = {
+        conversationId,
+        messageId,
+        cancelUrl: null,
+        cancelRequested: false,
+      };
+      activeRun.current = runContext;
 
       try {
         const run = await createRun({
@@ -247,11 +302,16 @@ export function useChatController(displayName: string | null = null) {
           })),
           mode: "auto",
         });
-        cancelUrl.current = run.cancel_url;
+        runContext.cancelUrl = run.cancel_url;
+        if (runContext.cancelRequested || activeRun.current !== runContext) {
+          await cancelRun(run.cancel_url);
+          return;
+        }
         cleanupStream.current?.();
         cleanupStream.current = subscribeToRun(run.event_url, {
-          onEvent: (event) => updateFromEvent(conversationId, messageId, event),
+          onEvent: (event) => updateFromEvent(runContext, event),
           onDisconnect: () => {
+            if (runContext.cancelRequested) return;
             store.updateConversation(conversationId, (current) => ({
               ...current,
               activity: { kind: "connecting", label: "Reconnecting" },
@@ -259,6 +319,7 @@ export function useChatController(displayName: string | null = null) {
           },
         });
       } catch (error) {
+        if (runContext.cancelRequested || activeRun.current !== runContext) return;
         const terminated = error instanceof ApiError && error.code === "conversation_terminated";
         store.updateConversation(conversationId, (current) => ({
           ...current,
@@ -277,6 +338,7 @@ export function useChatController(displayName: string | null = null) {
                 },
               ],
         }));
+        activeRun.current = null;
         setRunning(false);
       }
     },
@@ -303,22 +365,52 @@ export function useChatController(displayName: string | null = null) {
   );
 
   const stop = useCallback(async () => {
-    if (cancelUrl.current) await cancelRun(cancelUrl.current);
+    const runContext = activeRun.current;
+    if (!runContext) return;
+    runContext.cancelRequested = true;
     cleanupStream.current?.();
-    setRunning(false);
-  }, []);
+    cleanupStream.current = null;
+    store.updateConversation(runContext.conversationId, (conversation) =>
+      finalizeCancelledConversation(conversation, runContext.messageId, now()),
+    );
+    if (activeRun.current === runContext) {
+      activeRun.current = null;
+      setRunning(false);
+    }
+    if (runContext.cancelUrl) {
+      try {
+        await cancelRun(runContext.cancelUrl);
+      } catch {
+        // The transport records cancellation failures in the developer panel.
+      }
+    }
+  }, [store]);
 
   const newChat = useCallback(() => {
-    cleanupStream.current?.();
+    if (activeRun.current) void stop();
     setRunning(false);
     setDraft("");
     setEditingMessageId(null);
     store.setActiveId(null);
-  }, [store]);
+  }, [stop, store]);
+
+  const branchFromMessage = useCallback(
+    (messageId: string) => {
+      const source = store.activeConversation;
+      if (!source || running || source.terminated) return;
+      const branch = createConversationBranch(source, messageId);
+      if (!branch) return;
+      setDraft("");
+      setEditingMessageId(null);
+      store.upsertConversation(branch);
+    },
+    [running, store],
+  );
 
   return {
     ...store,
     beginEdit,
+    branchFromMessage,
     completeReveal,
     draft,
     editingMessageId,

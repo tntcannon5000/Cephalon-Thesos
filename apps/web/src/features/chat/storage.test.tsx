@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { useConversationStore } from "./storage";
+import type { Conversation } from "./types";
+import { createConversationBranch, useConversationStore } from "./storage";
 
 describe("useConversationStore", () => {
   beforeEach(() => localStorage.clear());
@@ -40,5 +41,80 @@ describe("useConversationStore", () => {
 
     act(() => result.current.deleteConversation("legacy"));
     expect(result.current.conversations).toHaveLength(0);
+  });
+
+  it("creates an independent branch through a completed assistant response", () => {
+    const source: Conversation = {
+      id: "source",
+      title: "Damage calculation",
+      titleState: "generated",
+      pinned: true,
+      updatedAt: "2026-08-16T10:00:00.000Z",
+      terminated: false,
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: "First question",
+          createdAt: "2026-08-16T09:00:00.000Z",
+          state: "complete",
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "First answer.",
+          createdAt: "2026-08-16T09:00:01.000Z",
+          state: "complete",
+        },
+        {
+          id: "user-2",
+          role: "user",
+          content: "Later question",
+          createdAt: "2026-08-16T09:01:00.000Z",
+          state: "complete",
+        },
+      ],
+    };
+    const ids = ["branch", "copy-user", "copy-assistant"];
+    const branch = createConversationBranch(
+      source,
+      "assistant-1",
+      () => ids.shift() ?? "unexpected",
+      "2026-08-16T11:00:00.000Z",
+    );
+
+    expect(branch?.id).toBe("branch");
+    expect(branch?.messages.map((message) => message.id)).toEqual([
+      "copy-user",
+      "copy-assistant",
+    ]);
+    expect(branch?.messages.map((message) => message.content)).toEqual([
+      "First question",
+      "First answer.",
+    ]);
+    expect(branch?.pinned).toBe(false);
+    expect(source.messages).toHaveLength(3);
+  });
+
+  it("refuses to branch a terminated conversation", () => {
+    const source: Conversation = {
+      id: "terminated",
+      title: "Closed",
+      titleState: "generated",
+      pinned: false,
+      updatedAt: "2026-08-16T10:00:00.000Z",
+      terminated: true,
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "Earlier answer.",
+          createdAt: "2026-08-16T09:00:00.000Z",
+          state: "complete",
+        },
+      ],
+    };
+
+    expect(createConversationBranch(source, "assistant-1")).toBeNull();
   });
 });

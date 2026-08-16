@@ -133,8 +133,24 @@ export async function editMessage(
 }
 
 export async function cancelRun(cancelUrl: string): Promise<void> {
-  const response = await fetch(cancelUrl, { method: "DELETE", credentials: "include" });
-  emitFrontendLog(response.ok ? "info" : "error", "transport.runs", "Run cancellation requested", {
-    status: response.status,
-  });
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetch(cancelUrl, { method: "DELETE", credentials: "include" });
+      if (response.ok || response.status === 404) {
+        emitFrontendLog("info", "transport.runs", "Run cancellation confirmed", {
+          attempt,
+          status: response.status,
+        });
+        return;
+      }
+      lastError = new ApiError("Run cancellation failed", response.status);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+
+  emitFrontendLog("error", "transport.runs", "Run cancellation failed", lastError);
+  throw lastError instanceof Error ? lastError : new Error("Run cancellation failed");
 }
