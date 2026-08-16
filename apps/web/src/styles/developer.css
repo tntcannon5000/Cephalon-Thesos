@@ -1,0 +1,230 @@
+.developer-panel {
+  position: fixed;
+  z-index: 40;
+  top: 80px;
+  right: 0;
+  bottom: 0;
+  width: var(--developer-panel-width);
+  display: grid;
+  grid-template-rows: 48px 44px minmax(0, 1fr) 30px;
+  color: var(--text-soft);
+  border-left: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+  box-shadow: -18px 0 42px var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.developer-panel-header,
+.developer-toolbar,
+.developer-panel-footer {
+  display: flex;
+  align-items: center;
+}
+
+.developer-panel-header {
+  justify-content: space-between;
+  padding: 0 12px 0 15px;
+  border-bottom: 1px solid var(--line);
+}
+
+.developer-panel-header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 560;
+  text-transform: uppercase;
+}
+
+.developer-panel-header button,
+.developer-actions button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--muted);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.developer-panel-header button:hover,
+.developer-actions button:hover {
+  color: var(--veris-text);
+}
+
+.developer-connection {
+  width: 6px;
+  height: 6px;
+  margin-left: 2px;
+  background: var(--muted-dim);
+  border-radius: 50%;
+}
+
+.developer-connection.is-live {
+  background: var(--veris);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.developer-connection.is-reconnecting {
+  background: var(--amber);
+}
+
+.developer-toolbar {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.developer-filters,
+.developer-actions {
+  display: flex;
+  align-items: center;
+}
+
+.developer-filters {
+  border: 1px solid var(--line);
+  clip-path: var(--clip-small);
+}
+
+.developer-filters button {
+  min-width: 42px;
+  height: 27px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.developer-filters button:last-child {
+  border-right: 0;
+}
+
+.developer-filters button:hover,
+.developer-filters button.is-active {
+  color: var(--veris-text);
+  background: var(--focus-inset);
+}
+
+.developer-actions {
+  gap: 2px;
+}
+
+.developer-log-list {
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--accent-dim) transparent;
+}
+
+.developer-log-line {
+  padding: 9px 12px 10px 13px;
+  border-bottom: 1px solid var(--line);
+  border-left: 2px solid var(--muted);
+}
+
+.developer-log-line[data-layer="frontend"] {
+  border-left-color: var(--veris);
+}
+
+.developer-log-line[data-layer="ai"] {
+  border-left-color: var(--amber);
+}
+
+.developer-log-line[data-level="error"] {
+  background: rgba(95, 31, 38, 0.14);
+  border-left-color: var(--danger);
+}
+
+.developer-log-line header {
+  display: grid;
+  grid-template-columns: 76px 24px 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  color: var(--muted-dim);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 9px;
+}
+
+.developer-log-line header span {
+  color: var(--veris);
+  font-weight: 700;
+}
+
+.developer-log-line[data-layer="backend"] header span {
+  color: var(--muted);
+}
+
+.developer-log-line[data-layer="ai"] header span {
+  color: var(--amber);
+}
+
+.developer-log-line header strong {
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+
+.developer-log-line[data-level="warning"] header strong {
+  color: var(--amber);
+}
+
+.developer-log-line[data-level="error"] header strong {
+  color: var(--danger);
+}
+
+.developer-log-line header small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.developer-log-line pre {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.developer-empty {
+  margin: 28px 16px;
+  color: var(--muted-dim);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 10px;
+}
+
+.developer-panel-footer {
+  justify-content: space-between;
+  padding: 0 12px;
+  color: var(--muted-dim);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 820px) {
+  .developer-panel {
+    top: 72px;
+    width: 100%;
+  }
+}
+
+@media (min-width: 2000px) and (min-height: 1200px) {
+  .developer-panel {
+    top: 94px;
+  }
+}

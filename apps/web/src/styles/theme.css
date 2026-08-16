@@ -1,0 +1,537 @@
+.theme-picker-scrim {
+  position: fixed;
+  z-index: 64;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: var(--scrim);
+  cursor: default;
+}
+
+body,
+.sidebar,
+.composer-shell,
+.suggestion-card,
+.header-toggle,
+.header-action,
+.message.user .message-bubble {
+  transition:
+    color 220ms ease,
+    border-color 220ms ease,
+    background-color 220ms ease;
+}
+
+.theme-picker {
+  position: fixed;
+  z-index: 65;
+  bottom: 28px;
+  left: calc(var(--sidebar-width) + 22px);
+  width: min(680px, calc(100vw - var(--sidebar-width) - 50px));
+  max-height: calc(100vh - 56px);
+  padding: 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+  box-shadow: 0 22px 62px var(--shadow);
+  clip-path: var(--clip-medium);
+}
+
+.theme-picker > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.theme-picker > header span {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.theme-picker h2 {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 540;
+}
+
+.theme-picker > header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--muted);
+  border: 0;
+  place-items: center;
+  background: transparent;
+  cursor: pointer;
+}
+
+.theme-picker > header button:hover {
+  color: var(--assistant);
+}
+
+.theme-groups {
+  display: grid;
+  gap: 15px;
+}
+
+.theme-group h3 {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 570;
+  text-transform: uppercase;
+}
+
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.theme-option {
+  display: flex;
+  min-width: 0;
+  padding: 8px;
+  color: var(--muted);
+  text-align: left;
+  border: 1px solid transparent;
+  flex-direction: column;
+  align-items: stretch;
+  background: transparent;
+  clip-path: var(--clip-small);
+  cursor: pointer;
+}
+
+.theme-option:hover,
+.theme-option:focus-visible,
+.theme-option.is-selected {
+  color: var(--text);
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+
+.theme-option.is-selected {
+  border-color: var(--accent-dim);
+}
+
+.theme-preview {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  margin-bottom: 9px;
+  overflow: hidden;
+  border: 1px solid;
+  clip-path: var(--clip-medium);
+}
+
+.theme-preview::before,
+.theme-preview::after {
+  position: absolute;
+  z-index: 2;
+  content: "";
+}
+
+.theme-preview::before {
+  top: 17%;
+  right: 14%;
+  left: 14%;
+  height: 1px;
+  background: currentColor;
+  box-shadow: 0 38px 0 currentColor;
+  opacity: 0.68;
+}
+
+.theme-preview::after {
+  top: 17%;
+  bottom: 16%;
+  left: 22%;
+  width: 1px;
+  background: currentColor;
+  opacity: 0.44;
+}
+
+.theme-preview i {
+  position: absolute;
+  display: block;
+}
+
+.theme-preview i:nth-child(1) {
+  inset: 29% 17% 22% 31%;
+  border: 1px solid currentColor;
+  background: var(--preview-surface);
+}
+
+.theme-preview i:nth-child(2) {
+  top: 13%;
+  right: 11%;
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+}
+
+.theme-preview i:nth-child(3) {
+  bottom: 11%;
+  left: 11%;
+  width: 4px;
+  height: 14px;
+  background: var(--preview-secondary);
+}
+
+.theme-preview i:nth-child(4) {
+  top: 43%;
+  left: 13%;
+  width: 9px;
+  height: 1px;
+  background: var(--preview-secondary);
+}
+
+.theme-preview em {
+  position: absolute;
+  right: 7px;
+  bottom: 6px;
+  color: var(--muted);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.theme-preview[data-profile="zariman"]::before {
+  top: 21%;
+  right: 10%;
+  left: 10%;
+  height: 52%;
+  border: 1px solid currentColor;
+  border-bottom: 0;
+  border-radius: 50% 50% 0 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 8px var(--preview-surface);
+}
+
+.theme-preview[data-profile="zariman"]::after {
+  top: 25%;
+  right: 23%;
+  bottom: 14%;
+  left: auto;
+  width: 1px;
+  background: var(--preview-secondary);
+  opacity: 0.8;
+  transform: rotate(31deg);
+}
+
+.theme-preview[data-profile="vallis"]::before {
+  inset: 20% 8% auto;
+  height: 50%;
+  background: repeating-linear-gradient(
+    168deg,
+    transparent 0 8px,
+    currentColor 8px 9px,
+    transparent 9px 15px
+  );
+  box-shadow: none;
+  opacity: 0.48;
+}
+
+.theme-preview[data-profile="vallis"]::after {
+  top: 18%;
+  bottom: 13%;
+  left: 23%;
+  width: 1px;
+  background: var(--preview-secondary);
+  box-shadow: 47px 12px 0 var(--preview-secondary);
+  opacity: 0.72;
+}
+
+.theme-preview[data-profile="deimos"]::before {
+  top: 10%;
+  right: 46%;
+  left: -8%;
+  height: 80%;
+  border: 1px solid currentColor;
+  border-left: 0;
+  border-radius: 0 62% 48% 0;
+  background: transparent;
+  box-shadow: 9px 0 0 -8px currentColor, 18px 0 0 -16px currentColor;
+}
+
+.theme-preview[data-profile="deimos"]::after {
+  top: 18%;
+  right: -8%;
+  bottom: 9%;
+  left: 58%;
+  width: auto;
+  border: 1px solid var(--preview-secondary);
+  border-right: 0;
+  border-radius: 58% 0 0 44%;
+  background: transparent;
+  opacity: 0.82;
+}
+
+.theme-preview[data-profile="sentient"]::before {
+  top: 22%;
+  right: 13%;
+  left: 13%;
+  height: 1px;
+  background: currentColor;
+  box-shadow: 18px 19px 0 var(--preview-secondary), -9px 38px 0 currentColor;
+  opacity: 0.78;
+  transform: rotate(-17deg);
+}
+
+.theme-preview[data-profile="sentient"]::after {
+  top: 19%;
+  bottom: 19%;
+  left: 50%;
+  width: 1px;
+  background: var(--preview-secondary);
+  opacity: 0.7;
+  transform: rotate(32deg);
+}
+
+.theme-preview[data-profile="void"]::before {
+  top: 19%;
+  right: 15%;
+  left: 15%;
+  height: 58%;
+  border: 1px solid currentColor;
+  border-right-color: transparent;
+  border-left-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 10px var(--preview-surface);
+  opacity: 0.72;
+}
+
+.theme-preview[data-profile="void"]::after {
+  top: 48%;
+  right: 8%;
+  bottom: auto;
+  left: 8%;
+  width: auto;
+  height: 1px;
+  background: var(--preview-secondary);
+  box-shadow: 0 0 8px currentColor;
+  opacity: 0.8;
+}
+
+.theme-option:hover .theme-preview[data-profile="zariman"]::after,
+.theme-option.is-selected .theme-preview[data-profile="zariman"]::after {
+  animation: preview-fracture 2.8s ease-in-out infinite;
+}
+
+.theme-option:hover .theme-preview[data-profile="vallis"]::before,
+.theme-option.is-selected .theme-preview[data-profile="vallis"]::before {
+  animation: preview-survey 2.4s linear infinite;
+}
+
+.theme-option:hover .theme-preview[data-profile="deimos"]::before,
+.theme-option.is-selected .theme-preview[data-profile="deimos"]::before {
+  animation: preview-breathe 3.8s ease-in-out infinite;
+}
+
+.theme-option:hover .theme-preview[data-profile="sentient"]::before,
+.theme-option.is-selected .theme-preview[data-profile="sentient"]::before {
+  animation: preview-articulate 2.6s steps(4, end) infinite;
+}
+
+.theme-option:hover .theme-preview[data-profile="void"]::before,
+.theme-option.is-selected .theme-preview[data-profile="void"]::before {
+  animation: preview-void-pulse 4.2s ease-in-out infinite;
+}
+
+.theme-preview svg {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 8px;
+  padding: 3px;
+  color: var(--selection-text);
+  background: var(--accent);
+}
+
+.theme-option strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-option small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+@keyframes preview-fracture {
+  0%, 72%, 100% { opacity: 0.28; }
+  78%, 88% { opacity: 1; }
+}
+
+@keyframes preview-survey {
+  from { transform: translateY(-5px); }
+  to { transform: translateY(5px); }
+}
+
+@keyframes preview-breathe {
+  0%, 100% { transform: scaleX(0.94); opacity: 0.5; }
+  50% { transform: scaleX(1.04); opacity: 0.9; }
+}
+
+@keyframes preview-articulate {
+  0%, 66%, 100% { transform: rotate(-17deg); }
+  72% { transform: rotate(-9deg); }
+  82% { transform: rotate(-22deg); }
+}
+
+@keyframes preview-void-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.94); }
+  50% { opacity: 0.88; transform: scale(1.02); }
+}
+
+.composer-shell::after {
+  position: absolute;
+  z-index: 3;
+  top: -2px;
+  left: 8%;
+  width: 4px;
+  height: 4px;
+  background: var(--secondary);
+  box-shadow: 0 0 9px var(--secondary);
+  content: "";
+  pointer-events: none;
+}
+
+.sidebar::after {
+  position: absolute;
+  z-index: 2;
+  top: 14%;
+  right: -2px;
+  width: 4px;
+  height: 4px;
+  background: var(--secondary);
+  box-shadow: 0 0 8px var(--secondary);
+  content: "";
+  pointer-events: none;
+}
+
+html[data-edge-motion="traverse"] .composer-shell::after {
+  animation: composer-edge-traverse var(--edge-duration) ease-in-out infinite alternate;
+}
+
+html[data-edge-motion="traverse"] .sidebar::after {
+  animation: sidebar-edge-traverse var(--edge-duration) ease-in-out infinite alternate;
+}
+
+html[data-edge-motion="drift"] .composer-shell::after,
+html[data-edge-motion="drift"] .sidebar::after {
+  animation: edge-drift var(--edge-duration) linear infinite;
+}
+
+html[data-edge-motion="pulse"] .composer-shell::after,
+html[data-edge-motion="pulse"] .sidebar::after {
+  animation: edge-signal var(--edge-duration) steps(4, end) infinite;
+}
+
+html[data-edge-motion="shimmer"] .composer-shell::after,
+html[data-edge-motion="shimmer"] .sidebar::after {
+  animation: edge-shimmer var(--edge-duration) ease-in-out infinite;
+}
+
+html[data-edge-motion="sweep"] .composer-shell::after,
+html[data-edge-motion="sweep"] .sidebar::after {
+  animation: edge-sweep var(--edge-duration) linear infinite;
+}
+
+html[data-edge-motion="breathe"] .composer-shell::after,
+html[data-edge-motion="breathe"] .sidebar::after {
+  animation: edge-breathe var(--edge-duration) ease-in-out infinite;
+}
+
+html[data-edge-motion="articulate"] .composer-shell::after,
+html[data-edge-motion="articulate"] .sidebar::after {
+  animation: edge-articulate var(--edge-duration) steps(6, end) infinite;
+}
+
+@keyframes composer-edge-traverse {
+  from { left: 8%; }
+  to { left: calc(92% - 4px); }
+}
+
+@keyframes sidebar-edge-traverse {
+  from { top: 14%; }
+  to { top: 82%; }
+}
+
+@keyframes edge-drift {
+  0% { opacity: 0.18; transform: translate(0, 0); }
+  45% { opacity: 1; }
+  100% { opacity: 0.18; transform: translate(24px, 24px); }
+}
+
+@keyframes edge-signal {
+  0%, 70% { opacity: 0.25; }
+  74%, 82% { opacity: 1; }
+  86%, 94% { opacity: 0.42; }
+  100% { opacity: 1; }
+}
+
+@keyframes edge-shimmer {
+  0%, 70%, 100% { opacity: 0.18; }
+  77% { opacity: 1; transform: translate(18px, 0); }
+  86% { opacity: 0.42; transform: translate(20px, 0); }
+}
+
+@keyframes edge-sweep {
+  from { opacity: 0.2; transform: translate(-18px, -5px); }
+  45% { opacity: 0.95; }
+  to { opacity: 0.2; transform: translate(30px, 11px); }
+}
+
+@keyframes edge-breathe {
+  0%, 100% { opacity: 0.28; transform: scale(0.72); }
+  50% { opacity: 1; transform: scale(1.42); }
+}
+
+@keyframes edge-articulate {
+  0%, 64%, 100% { opacity: 0.22; transform: translate(0, 0); }
+  70% { opacity: 1; transform: translate(11px, 0); }
+  76% { opacity: 0.46; transform: translate(5px, 0); }
+  82% { opacity: 0.88; transform: translate(17px, 0); }
+}
+
+@media (max-width: 820px) {
+  .theme-picker {
+    right: 14px;
+    bottom: 18px;
+    left: 14px;
+    width: auto;
+    padding: 13px;
+  }
+
+  .theme-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .theme-option {
+    padding: 6px;
+  }
+
+  .theme-option small {
+    display: none;
+  }
+}
+
+@media (min-width: 370px) and (max-width: 820px) {
+  .theme-options {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

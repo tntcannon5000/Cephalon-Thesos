@@ -1,0 +1,97 @@
+@import "tailwindcss";
+@import "./layout.css";
+@import "./components.css";
+@import "./theme.css";
+@import "./motion.css";
+
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+  color: var(--text);
+  background: var(--background);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --background: #070706;
+  --surface: rgba(17, 16, 14, 0.92);
+  --surface-solid: #11100e;
+  --surface-raised: #1a1815;
+  --surface-hover: #211e19;
+  --sidebar: rgba(9, 9, 8, 0.94);
+  --header: rgba(7, 7, 6, 0.9);
+  --line: rgba(207, 194, 164, 0.24);
+  --line-strong: rgba(220, 205, 171, 0.5);
+  --text: #f1efe9;
+  --text-soft: #dcd8ce;
+  --muted: #98938a;
+  --muted-dim: #6a675f;
+  --accent: #d4af67;
+  --assistant: #e6d8ad;
+  --accent-dim: #80683d;
+  --secondary: #b66557;
+  --danger: #df7f76;
+  --user-bubble: rgba(35, 32, 28, 0.76);
+  --focus-inset: rgba(212, 175, 103, 0.14);
+  --selection-text: #120e08;
+  --scrim: rgba(0, 0, 0, 0.66);
+  --shadow: rgba(0, 0, 0, 0.48);
+  --edge-duration: 7.2s;
+  --veris: var(--accent);
+  --veris-text: var(--assistant);
+  --veris-dim: var(--accent-dim);
+  --amber: var(--secondary);
+  --clip-small: polygon(0 6px, 6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
+  --clip-medium: polygon(0 8px, 8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+}
+
+* {
+  box-sizing: border-box;
+  letter-spacing: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--background);
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  color: var(--selection-text);
+  background: var(--assistant);
+}

@@ -1,0 +1,14 @@
+{
+  "name": "thesos",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @thesos/web dev",
+    "build": "pnpm --filter @thesos/web build",
+    "lint": "pnpm --filter @thesos/web lint",
+    "typecheck": "pnpm --filter @thesos/web typecheck",
+    "test": "pnpm --filter @thesos/web test",
+    "test:e2e": "pnpm --filter @thesos/web test:e2e"
+  }
+}

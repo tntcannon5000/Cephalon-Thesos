@@ -1,0 +1,41 @@
+@keyframes caret-blink {
+  0%, 46% { opacity: 1; }
+  47%, 100% { opacity: 0; }
+}
+
+@keyframes activity-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(93, 228, 236, 0.44); opacity: 0.55; }
+  70% { box-shadow: 0 0 0 8px rgba(93, 228, 236, 0); opacity: 1; }
+  100% { box-shadow: 0 0 0 0 rgba(93, 228, 236, 0); opacity: 0.55; }
+}
+
+@keyframes rail-scan {
+  0% { transform: translateY(0); opacity: 0.28; }
+  50% { opacity: 1; }
+  100% { transform: translateY(88px); opacity: 0.28; }
+}
+
+.type-caret,
+.response-caret {
+  animation: caret-blink 820ms steps(1, end) infinite;
+}
+
+.activity-pulse {
+  animation: activity-pulse 1.6s ease-out infinite;
+}
+
+.sidebar-rail i:nth-child(2) {
+  animation: rail-scan 5s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+

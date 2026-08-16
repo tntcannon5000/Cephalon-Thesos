@@ -1,0 +1,51 @@
+[project]
+name = "thesos-api"
+version = "0.1.0"
+description = "Local alpha API and bounded agent runtime for Thesos"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "aiosqlite>=0.21.0",
+    "alembic>=1.16.0",
+    "dbos>=2.8.0",
+    "fastapi>=0.116.0",
+    "pydantic-ai-slim[dbos,openrouter]>=1.0.0",
+    "pydantic-settings>=2.10.0",
+    "psycopg[binary,pool]>=3.2.0",
+    "python-dotenv>=1.1.0",
+    "sqlalchemy>=2.0.41",
+    "uvicorn[standard]>=0.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "pyright>=1.1.403",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.1.0",
+    "ruff>=0.12.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/veris_api"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["src"]
+# FastAPI consumes decorated route and middleware functions through registration side effects.
+reportUnusedFunction = false

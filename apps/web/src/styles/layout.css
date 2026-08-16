@@ -1,0 +1,303 @@
+.app-shell {
+  --developer-panel-width: min(520px, 40vw);
+  --sidebar-width: 254px;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  isolation: isolate;
+  background: var(--background);
+}
+
+.archive-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.interface-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.intro-active .interface-layer {
+  visibility: hidden;
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
+.app-header {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  left: var(--sidebar-width);
+  height: 80px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 22px 30px 0;
+  pointer-events: none;
+}
+
+.app-header > * {
+  pointer-events: auto;
+}
+
+.workspace {
+  --landing-bottom: 28%;
+  --landing-composer-inline: max(8%, calc((100% - 820px) / 2));
+  --landing-suggestion-inline: max(10%, calc((100% - 760px) / 2));
+  --docked-inline: max(4.5%, calc((100% - 1280px) / 2));
+  position: fixed;
+  z-index: 3;
+  top: 80px;
+  right: 0;
+  bottom: 0;
+  left: var(--sidebar-width);
+  overflow: hidden;
+  transition: right 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.workspace-state {
+  width: 100%;
+  height: 100%;
+}
+
+.landing-view {
+  width: 100%;
+  height: 100%;
+  padding: clamp(108px, 16vh, 178px) 3.2vw 190px;
+}
+
+.archive-prompt {
+  width: min(960px, 84%);
+  margin: 0 auto;
+  text-align: center;
+}
+
+.prompt-line {
+  display: grid;
+  grid-template-columns: minmax(36px, 1fr) auto minmax(36px, 1fr);
+  align-items: center;
+  gap: 20px;
+}
+
+.suggestion-rail {
+  position: absolute;
+  right: var(--landing-suggestion-inline);
+  bottom: calc(var(--landing-bottom) + 78px);
+  left: var(--landing-suggestion-inline);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  width: auto;
+  margin: 0;
+}
+
+.composer-wrap {
+  position: absolute;
+  z-index: 12;
+}
+
+.composer-wrap.is-landing {
+  right: var(--landing-composer-inline);
+  bottom: var(--landing-bottom);
+  left: var(--landing-composer-inline);
+}
+
+.composer-wrap.is-docked {
+  right: var(--docked-inline);
+  bottom: 56px;
+  left: var(--docked-inline);
+}
+
+.conversation-view {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--veris-dim) transparent;
+}
+
+.conversation-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.conversation-feed {
+  display: flex;
+  align-items: flex-end;
+  min-height: 100%;
+}
+
+.conversation-column {
+  width: min(900px, calc(100% - 80px));
+  margin: 0 auto;
+  padding: 42px 0 188px;
+}
+
+.legal-note {
+  position: absolute;
+  z-index: 8;
+  right: 0;
+  bottom: 17px;
+  left: 0;
+  color: var(--muted-dim);
+  font-size: 11px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.info-page {
+  min-height: 100%;
+  padding: 12vh max(8vw, 48px);
+  background: var(--background);
+}
+
+.info-page h1 {
+  margin: 12px 0 30px;
+  font-size: 42px;
+  font-weight: 450;
+}
+
+.info-page > div {
+  max-width: 740px;
+  color: var(--text-soft);
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+.info-page > a {
+  display: inline-block;
+  margin-top: 34px;
+  color: var(--veris-text);
+  border-bottom: 1px solid var(--veris-dim);
+}
+
+@media (max-width: 1180px) {
+  .workspace { --docked-inline: 5.5%; }
+}
+
+@media (max-width: 820px) {
+  .app-header {
+    left: 0;
+    height: 72px;
+    align-items: center;
+    padding: 0 15px 0 19px;
+    border-bottom: 1px solid var(--line);
+    background: var(--header);
+    backdrop-filter: blur(14px);
+  }
+
+  .workspace {
+    --landing-bottom: 72px;
+    --landing-composer-inline: 14px;
+    --landing-suggestion-inline: 22px;
+    --docked-inline: 14px;
+    top: 72px;
+    left: 0;
+  }
+
+  .landing-view {
+    padding: 84px 14px 150px;
+  }
+
+  .archive-prompt {
+    width: 100%;
+  }
+
+  .prompt-line {
+    display: block;
+  }
+
+  .prompt-line > i {
+    display: none;
+  }
+
+  .suggestion-rail {
+    bottom: 142px;
+    grid-template-columns: 1fr;
+    gap: 0;
+    width: auto;
+    margin: 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .composer-wrap.is-landing {
+    bottom: var(--landing-bottom);
+  }
+
+  .composer-wrap.is-docked {
+    bottom: 42px;
+  }
+
+  .has-active-conversation .app-header {
+    height: 108px;
+  }
+
+  .has-active-conversation .workspace {
+    top: 108px;
+  }
+
+  .conversation-column {
+    width: calc(100% - 30px);
+    padding: 76px 0 156px;
+  }
+
+  .legal-note {
+    bottom: 10px;
+    font-size: 10px;
+  }
+}
+
+@media (min-width: 821px) {
+  .developer-open .workspace {
+    right: var(--developer-panel-width);
+  }
+}
+
+@media (max-height: 760px) and (min-width: 821px) {
+  .workspace {
+    --landing-bottom: 20%;
+  }
+
+  .landing-view {
+    padding-top: 80px;
+  }
+
+}
+
+@media (min-width: 2000px) and (min-height: 1200px) {
+  .app-header {
+    left: var(--sidebar-width);
+    height: 94px;
+    padding: 28px 42px 0;
+  }
+
+  .workspace {
+    --landing-bottom: 34%;
+    top: 94px;
+    left: var(--sidebar-width);
+  }
+
+  .landing-view {
+    padding-top: clamp(138px, 16vh, 210px);
+  }
+
+  .archive-prompt {
+    width: min(1080px, 84%);
+  }
+
+  .conversation-column {
+    width: min(1040px, calc(100% - 100px));
+    padding-top: 54px;
+  }
+
+}
