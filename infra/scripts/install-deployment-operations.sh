@@ -9,6 +9,7 @@ fi
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 usermod --append --groups docker thesos-deploy
 install -d -m 0750 -o root -g thesos-deploy /etc/thesos
+install -d -m 2775 -o root -g thesos-deploy /opt/thesos
 install -d -m 0770 -o thesos-deploy -g thesos-deploy /opt/thesos/releases
 install -m 0755 -o root -g root "${script_dir}/deploy-release.sh" \
   /usr/local/sbin/thesos-deploy-release
