@@ -202,13 +202,51 @@ async def test_private_alpha_registration_ownership_quota_and_admin_mfa(
             assert login.status_code == 200
             csrf = admin.cookies.get("thesos_csrf")
             assert csrf
-            assert (await admin.get("/api/v1/admin/overview")).status_code == 403
+            assert (await admin.get("/api/v1/admin/overview")).status_code == 200
+            metrics = await admin.get("/api/v1/admin/metrics", params={"period": "day"})
+            assert metrics.status_code == 200
+            assert len(metrics.json()["points"]) == 24
+            assert metrics.json()["total_tokens"] == 0
             assert (
                 await admin.delete(
                     f"/api/v1/conversations/{conversation_id}",
                     headers={"X-CSRF-Token": csrf},
                 )
             ).status_code == 404
+
+            second_admin_email = "second-admin@example.com"
+            invited = await admin.post(
+                "/api/v1/admin/allowlist",
+                headers={"X-CSRF-Token": csrf},
+                json={"email": second_admin_email, "role": "admin"},
+            )
+            assert invited.status_code == 200
+            registered = await admin.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": second_admin_email,
+                    "password": password,
+                    "password_confirmation": password,
+                    "accept_terms": True,
+                    "terms_version": terms_version,
+                },
+            )
+            assert registered.status_code == 200
+            verified = await admin.post(
+                "/api/v1/auth/verify-email",
+                json={"token": captured["verify_email"][-1]},
+            )
+            assert verified.status_code == 200
+
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://testserver"
+            ) as second_admin:
+                second_login = await second_admin.post(
+                    "/api/v1/auth/login",
+                    json={"email": second_admin_email, "password": password},
+                )
+                assert second_login.status_code == 200
+                assert (await second_admin.get("/api/v1/admin/overview")).status_code == 200
 
             setup = await admin.post(
                 "/api/v1/admin/mfa/setup",

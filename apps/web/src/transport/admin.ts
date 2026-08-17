@@ -44,6 +44,50 @@ export interface MFASetup {
   provisioning_uri: string;
 }
 
+export type MetricsPeriod = "15m" | "hour" | "day" | "week" | "month" | "year";
+
+export interface MetricPoint {
+  started_at: string;
+  attempts: number;
+  runs: number;
+  request_tokens: number;
+  response_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: string;
+}
+
+export interface UserUsage {
+  user_id: string;
+  email: string;
+  runs: number;
+  total_tokens: number;
+  estimated_cost_usd: string;
+}
+
+export interface ModelUsage {
+  provider: string;
+  model: string;
+  attempts: number;
+  total_tokens: number;
+  estimated_cost_usd: string;
+  average_latency_ms: number | null;
+}
+
+export interface AdminMetrics {
+  period: MetricsPeriod;
+  starts_at: string;
+  ends_at: string;
+  attempts: number;
+  runs: number;
+  request_tokens: number;
+  response_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: string;
+  points: MetricPoint[];
+  users: UserUsage[];
+  models: ModelUsage[];
+}
+
 export async function loadAdminData() {
   const [overview, users, accessRequests, quotaRequests] = await Promise.all([
     apiFetch<AdminOverview>("/api/v1/admin/overview"),
@@ -52,6 +96,10 @@ export async function loadAdminData() {
     apiFetch<QuotaRequest[]>("/api/v1/admin/quota-requests"),
   ]);
   return { overview, users, accessRequests, quotaRequests };
+}
+
+export function loadAdminMetrics(period: MetricsPeriod): Promise<AdminMetrics> {
+  return apiFetch<AdminMetrics>(`/api/v1/admin/metrics?period=${period}`);
 }
 
 export function startMFA(): Promise<MFASetup> {
@@ -66,10 +114,10 @@ export async function confirmMFA(code: string): Promise<string[]> {
   return response.recovery_codes;
 }
 
-export async function addAllowlist(email: string): Promise<void> {
+export async function addAllowlist(email: string, role: "admin" | null): Promise<void> {
   await apiFetch("/api/v1/admin/allowlist", {
     method: "POST",
-    body: JSON.stringify({ email, role: null }),
+    body: JSON.stringify({ email, role }),
   });
 }
 

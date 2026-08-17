@@ -9,6 +9,50 @@
   padding: 92px 24px 56px;
 }
 
+.auth-modal-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  overflow: auto;
+  padding: 28px 16px;
+  background: color-mix(in srgb, var(--background) 76%, transparent);
+  backdrop-filter: blur(5px);
+  place-items: center;
+}
+
+.auth-shell.is-modal {
+  width: min(430px, 100%);
+  min-height: auto;
+  overflow: visible;
+  padding: 0;
+}
+
+.auth-shell.is-modal::before { display: none; }
+.auth-shell.is-modal .auth-gate { position: relative; width: 100%; }
+
+.auth-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 31px;
+  height: 31px;
+  padding: 0;
+  color: var(--muted);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  place-items: center;
+}
+
+.auth-close:hover,
+.auth-close:focus-visible {
+  color: var(--assistant);
+  border-color: var(--line);
+  outline: 0;
+}
+
 .auth-shell::before {
   position: fixed;
   z-index: -1;
@@ -108,4 +152,6 @@
   .auth-legal { position: static; margin-top: 26px; }
   .account-trigger span { display: none; }
   .account-menu { position: fixed; top: 64px; right: 12px; }
+  .auth-modal-backdrop { align-items: start; padding-top: 22px; }
+  .auth-shell.is-modal { padding: 0; }
 }

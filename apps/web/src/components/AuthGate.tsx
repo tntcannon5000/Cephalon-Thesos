@@ -1,4 +1,4 @@
-import { ArrowRight, EnvelopeSimple, Key, ShieldCheck } from "@phosphor-icons/react";
+import { ArrowRight, EnvelopeSimple, Key, ShieldCheck, X } from "@phosphor-icons/react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useState, type FormEvent } from "react";
 
@@ -34,9 +34,15 @@ function pendingLabel(mode: Mode): string {
   return "Sending reset link...";
 }
 
-export function AuthGate() {
+interface AuthGateProps {
+  initialMode?: "login" | "register";
+  modal?: boolean;
+  onClose?: () => void;
+}
+
+export function AuthGate({ initialMode = "login", modal = false, onClose }: AuthGateProps) {
   const auth = useAuth();
-  const [mode, setMode] = useState<Mode>("login");
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -97,14 +103,19 @@ export function AuthGate() {
   };
 
   return (
-    <main className="auth-shell">
-      <ThesosBrand intro={false} />
+    <main className={`auth-shell ${modal ? "is-modal" : ""}`}>
+      {!modal ? <ThesosBrand intro={false} /> : null}
       <motion.section
         className="auth-gate"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.48 }}
       >
+        {modal ? (
+          <button className="auth-close" type="button" aria-label="Close account access" onClick={onClose}>
+            <X size={17} weight="thin" />
+          </button>
+        ) : null}
         <div className="auth-heading">
           <span className="auth-sigil"><ShieldCheck size={18} weight="thin" /></span>
           <p>PRIVATE ALPHA</p>
@@ -169,7 +180,7 @@ export function AuthGate() {
           {mode === "resend" || mode === "forgot" ? <button type="button" onClick={() => selectMode("login")}>Return to login</button> : null}
         </div>
       </motion.section>
-      <p className="auth-legal">Unofficial. Not affiliated with Digital Extremes.</p>
+      {!modal ? <p className="auth-legal">Unofficial. Not affiliated with Digital Extremes.</p> : null}
     </main>
   );
 }

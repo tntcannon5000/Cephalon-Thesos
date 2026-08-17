@@ -42,7 +42,11 @@ const DeveloperPanel = import.meta.env.DEV
 
 const DEVELOPER_MODE_KEY = "thesos.developer-mode";
 
-function ChatPage() {
+interface ChatPageProps {
+  resumeIntroAfterAuth?: boolean;
+}
+
+function ChatPage({ resumeIntroAfterAuth = false }: ChatPageProps) {
   const auth = useAuth();
   const identity = useUserIdentity();
   const { setThemeId, themeId } = useTheme();
@@ -57,6 +61,7 @@ function ChatPage() {
   const accountId = auth.user?.id;
   const [menuOpen, setMenuOpen] = useState(false);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [namePromptDismissed, setNamePromptDismissed] = useState(false);
   const [developerMode, setDeveloperMode] = useState(
     () =>
       import.meta.env.DEV &&
@@ -67,7 +72,7 @@ function ChatPage() {
     chat.hydrated &&
     chat.conversationCount === 0 &&
     !displayName &&
-    !identity.introComplete &&
+    !namePromptDismissed &&
     chat.activeConversation === null;
   const showLanding = !chat.activeConversation || chat.activeConversation.messages.length === 0;
 
@@ -130,7 +135,9 @@ function ChatPage() {
       <AnimatePresence>
         {showIntro ? (
           <IntroSequence
+            skipTyping={resumeIntroAfterAuth}
             onComplete={(name) => {
+              setNamePromptDismissed(true);
               identity.completeIntro(name);
               if (name) void auth.updatePreferences({ display_name: name });
             }}
@@ -243,18 +250,52 @@ function ChatPage() {
 
 function RootPage() {
   const auth = useAuth();
+  const [authMode, setAuthMode] = useState<"login" | "register" | null>(null);
+  const [enteredThroughIntro, setEnteredThroughIntro] = useState(false);
   if (auth.status === "loading") {
     return <div className="auth-loading" aria-label="Opening the Archives"><i /></div>;
   }
   if (!auth.user) {
     return (
-      <div className="app-shell">
+      <div className="app-shell intro-active logged-out-intro">
         <Suspense fallback={null}><ArchiveScene /></Suspense>
-        <AuthGate />
+        <ThesosBrand intro />
+        <IntroSequence
+          mode="auth"
+          onLogin={() => {
+            setEnteredThroughIntro(true);
+            setAuthMode("login");
+          }}
+          onRegister={() => {
+            setEnteredThroughIntro(true);
+            setAuthMode("register");
+          }}
+        />
+        <AnimatePresence>
+          {authMode ? (
+            <motion.div
+              className="auth-modal-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35 }}
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) setAuthMode(null);
+              }}
+            >
+              <AuthGate
+                key={authMode}
+                initialMode={authMode}
+                modal
+                onClose={() => setAuthMode(null)}
+              />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
     );
   }
-  return <ChatPage />;
+  return <ChatPage resumeIntroAfterAuth={enteredThroughIntro} />;
 }
 
 export function App() {

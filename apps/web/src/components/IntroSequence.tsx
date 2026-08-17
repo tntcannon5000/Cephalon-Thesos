@@ -1,4 +1,4 @@
-import { ArrowRight } from "@phosphor-icons/react";
+import { ArrowRight, SignIn, UserPlus } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 
@@ -8,22 +8,33 @@ const WELCOME =
   "Welcome, Tenno. I am Thesos. Ask me anything and I will search the Origin System archives to answer you.";
 
 interface IntroSequenceProps {
-  onComplete: (displayName?: string) => void;
+  mode?: "auth" | "name";
+  onComplete?: (displayName?: string) => void;
+  onLogin?: () => void;
+  onRegister?: () => void;
+  skipTyping?: boolean;
 }
 
-export function IntroSequence({ onComplete }: IntroSequenceProps) {
+export function IntroSequence({
+  mode = "name",
+  onComplete,
+  onLogin,
+  onRegister,
+  skipTyping = false,
+}: IntroSequenceProps) {
   const reducedMotion = useReducedMotion();
-  const [visible, setVisible] = useState(Boolean(reducedMotion));
-  const [characters, setCharacters] = useState(reducedMotion ? WELCOME.length : 0);
+  const revealImmediately = Boolean(reducedMotion) || skipTyping;
+  const [visible, setVisible] = useState(revealImmediately);
+  const [characters, setCharacters] = useState(revealImmediately ? WELCOME.length : 0);
   const [displayName, setDisplayName] = useState("");
   const [nameInvalid, setNameInvalid] = useState(false);
   const sequenceComplete = visible && characters >= WELCOME.length;
 
   useEffect(() => {
-    if (reducedMotion) return;
+    if (revealImmediately) return;
     const revealTimer = window.setTimeout(() => setVisible(true), 680);
     return () => window.clearTimeout(revealTimer);
-  }, [reducedMotion]);
+  }, [revealImmediately]);
 
   useEffect(() => {
     if (!visible || reducedMotion || characters >= WELCOME.length) return;
@@ -60,49 +71,69 @@ export function IntroSequence({ onComplete }: IntroSequenceProps) {
                 transition={{ duration: reducedMotion ? 0 : 0.42 }}
               >
                 <form
-                  className="intro-name-form"
+                  className={mode === "auth" ? "intro-auth-actions" : "intro-name-form"}
                   onSubmit={(event) => {
                     event.preventDefault();
+                    if (mode === "auth") return;
                     const normalized = normalizeDisplayName(displayName);
                     if (!normalized) {
                       setNameInvalid(true);
                       return;
                     }
-                    onComplete(normalized);
+                    onComplete?.(normalized);
                   }}
                 >
-                  <label htmlFor="intro-display-name">How should I address you?</label>
-                  <div className="intro-name-field">
-                    <input
-                      id="intro-display-name"
-                      value={displayName}
-                      maxLength={32}
-                      autoComplete="nickname"
-                      aria-invalid={nameInvalid}
-                      onChange={(event) => {
-                        setDisplayName(event.target.value);
-                        setNameInvalid(false);
-                      }}
-                    />
-                    <button type="submit" aria-label="Enter the Archives" disabled={!displayName.trim()}>
-                      <ArrowRight size={18} weight="thin" />
-                    </button>
-                  </div>
-                  <AnimatePresence>
-                    {nameInvalid ? (
-                      <motion.small initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                        Use up to 32 letters, numbers, spaces, apostrophes, hyphens, or periods.
-                      </motion.small>
-                    ) : null}
-                  </AnimatePresence>
+                  {mode === "auth" ? (
+                    <>
+                      <span>Continue into the private alpha</span>
+                      <div>
+                        <button type="button" onClick={onLogin}>
+                          <SignIn size={17} weight="thin" /> Log in
+                        </button>
+                        <button className="is-primary" type="button" onClick={onRegister}>
+                          <UserPlus size={17} weight="thin" /> Register
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <label htmlFor="intro-display-name">How should I address you?</label>
+                      <div className="intro-name-field">
+                        <input
+                          id="intro-display-name"
+                          value={displayName}
+                          maxLength={32}
+                          autoComplete="nickname"
+                          autoFocus
+                          aria-invalid={nameInvalid}
+                          onChange={(event) => {
+                            setDisplayName(event.target.value);
+                            setNameInvalid(false);
+                          }}
+                        />
+                        <button type="submit" aria-label="Enter the Archives" disabled={!displayName.trim()}>
+                          <ArrowRight size={18} weight="thin" />
+                        </button>
+                      </div>
+                      <AnimatePresence>
+                        {nameInvalid ? (
+                          <motion.small initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                            Use up to 32 letters, numbers, spaces, apostrophes, hyphens, or periods.
+                          </motion.small>
+                        ) : null}
+                      </AnimatePresence>
+                    </>
+                  )}
                 </form>
               </motion.div>
             ) : null}
           </AnimatePresence>
         </motion.div>
-        <button className="intro-skip" type="button" onClick={() => onComplete()}>
-          Enter Archives
-        </button>
+        {mode === "name" ? (
+          <button className="intro-skip" type="button" onClick={() => onComplete?.()}>
+            Ask me later
+          </button>
+        ) : null}
       </motion.section>
     </AnimatePresence>
   );

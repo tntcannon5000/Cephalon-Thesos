@@ -23,6 +23,8 @@ from veris_api.db.identity import (
 from veris_api.identity_schemas import (
     AdminAccessRequestResponse,
     AdminAuditResponse,
+    AdminMetricsPeriod,
+    AdminMetricsResponse,
     AdminOverviewResponse,
     AdminQuotaRequestResponse,
     AdminUserResponse,
@@ -42,7 +44,7 @@ router = APIRouter(prefix="/api/v1/admin")
 
 async def _admin_identity(request: Request, *, mutation: bool = False):
     identity = await require_identity(request)
-    require_admin(identity)
+    require_admin(identity, enrolled=False)
     if mutation:
         require_csrf(request, identity)
         require_recent_auth(identity)
@@ -121,6 +123,15 @@ async def get_overview(request: Request) -> AdminOverviewResponse:
     return AdminOverviewResponse.model_validate(await admin.overview())
 
 
+@router.get("/metrics", response_model=AdminMetricsResponse)
+async def get_metrics(
+    request: Request,
+    period: AdminMetricsPeriod = "day",
+) -> AdminMetricsResponse:
+    await _admin_identity(request)
+    return AdminMetricsResponse.model_validate(await admin.usage_metrics(period))
+
+
 @router.get("/users", response_model=list[AdminUserResponse])
 async def get_users(request: Request) -> list[AdminUserResponse]:
     await _admin_identity(request)
@@ -143,6 +154,12 @@ async def add_allowlist(body: AllowlistCreate, request: Request) -> GenericAuthR
         metadata={"role": body.role or "user"},
         ip_pseudonym=ip_pseudonym(request),
     )
+    if body.role == "admin":
+        return GenericAuthResponse(
+            message=(
+                "The address is eligible for registration and will receive administrator access."
+            )
+        )
     return GenericAuthResponse(message="The address is now eligible for registration.")
 
 

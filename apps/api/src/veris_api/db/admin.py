@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import distinct, func, select, update
+from sqlalchemy import distinct, func, select, text, update
+from sqlalchemy.sql.elements import ColumnElement
 
 from veris_api.db.models import (
     AccessAllowlist,
@@ -21,6 +24,163 @@ from veris_api.db.models import (
     UserRole,
 )
 from veris_api.db.session import get_session_factory
+
+
+@dataclass(frozen=True)
+class MetricsWindow:
+    start: datetime
+    end: datetime
+    bucket_starts: tuple[datetime, ...]
+    bucket_expression: ColumnElement[Any]
+
+
+def _shift_month(value: datetime, months: int) -> datetime:
+    position = value.year * 12 + value.month - 1 + months
+    return value.replace(year=position // 12, month=position % 12 + 1, day=1)
+
+
+def metrics_window(period: str, *, now: datetime | None = None) -> MetricsWindow:
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    if period == "year":
+        final_month = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start = _shift_month(final_month, -11)
+        end = _shift_month(final_month, 1)
+        starts = tuple(_shift_month(start, index) for index in range(12))
+        return MetricsWindow(start, end, starts, func.date_trunc("month", ProviderUsage.created_at))
+
+    definitions = {
+        "15m": (timedelta(minutes=1), 15),
+        "hour": (timedelta(minutes=5), 12),
+        "day": (timedelta(hours=1), 24),
+        "week": (timedelta(days=1), 7),
+        "month": (timedelta(days=1), 30),
+    }
+    bucket, count = definitions[period]
+    seconds = int(bucket.total_seconds())
+    epoch_seconds = int(current.timestamp())
+    end = datetime.fromtimestamp((epoch_seconds // seconds + 1) * seconds, tz=UTC)
+    start = end - bucket * count
+    starts = tuple(start + bucket * index for index in range(count))
+    expression = func.date_bin(
+        text(f"INTERVAL '{seconds} seconds'"),
+        ProviderUsage.created_at,
+        datetime(1970, 1, 1, tzinfo=UTC),
+    )
+    return MetricsWindow(start, end, starts, expression)
+
+
+async def usage_metrics(period: str) -> dict[str, object]:
+    window = metrics_window(period)
+    bucket = window.bucket_expression
+    model_name = func.coalesce(ProviderUsage.resolved_model, ProviderUsage.requested_model)
+    async with get_session_factory()() as session:
+        timeline_rows = (
+            await session.execute(
+                select(
+                    bucket.label("bucket"),
+                    func.count(ProviderUsage.id),
+                    func.count(distinct(ProviderUsage.run_id)),
+                    func.coalesce(func.sum(ProviderUsage.request_tokens), 0),
+                    func.coalesce(func.sum(ProviderUsage.response_tokens), 0),
+                    func.coalesce(func.sum(ProviderUsage.total_tokens), 0),
+                    func.coalesce(func.sum(ProviderUsage.estimated_cost_usd), Decimal("0")),
+                )
+                .where(
+                    ProviderUsage.created_at >= window.start,
+                    ProviderUsage.created_at < window.end,
+                )
+                .group_by(bucket)
+                .order_by(bucket)
+            )
+        ).all()
+        user_rows = (
+            await session.execute(
+                select(
+                    UserAccount.id,
+                    UserAccount.email,
+                    func.count(distinct(ProviderUsage.run_id)),
+                    func.coalesce(func.sum(ProviderUsage.total_tokens), 0),
+                    func.coalesce(func.sum(ProviderUsage.estimated_cost_usd), Decimal("0")),
+                )
+                .join(AgentRun, AgentRun.user_id == UserAccount.id)
+                .join(ProviderUsage, ProviderUsage.run_id == AgentRun.id)
+                .where(
+                    ProviderUsage.created_at >= window.start,
+                    ProviderUsage.created_at < window.end,
+                )
+                .group_by(UserAccount.id, UserAccount.email)
+                .order_by(func.sum(ProviderUsage.total_tokens).desc())
+            )
+        ).all()
+        model_rows = (
+            await session.execute(
+                select(
+                    ProviderUsage.provider,
+                    model_name.label("model"),
+                    func.count(ProviderUsage.id),
+                    func.coalesce(func.sum(ProviderUsage.total_tokens), 0),
+                    func.coalesce(func.sum(ProviderUsage.estimated_cost_usd), Decimal("0")),
+                    func.avg(ProviderUsage.latency_ms),
+                )
+                .where(
+                    ProviderUsage.created_at >= window.start,
+                    ProviderUsage.created_at < window.end,
+                )
+                .group_by(ProviderUsage.provider, model_name)
+                .order_by(func.sum(ProviderUsage.total_tokens).desc())
+            )
+        ).all()
+
+    rows_by_bucket = {row[0].astimezone(UTC): row for row in timeline_rows}
+    points = []
+    for started_at in window.bucket_starts:
+        row = rows_by_bucket.get(started_at)
+        points.append(
+            {
+                "started_at": started_at,
+                "attempts": int(row[1] if row else 0),
+                "runs": int(row[2] if row else 0),
+                "request_tokens": int(row[3] if row else 0),
+                "response_tokens": int(row[4] if row else 0),
+                "total_tokens": int(row[5] if row else 0),
+                "estimated_cost_usd": str(row[6] if row else Decimal("0")),
+            }
+        )
+    return {
+        "period": period,
+        "starts_at": window.start,
+        "ends_at": window.end,
+        "attempts": sum(point["attempts"] for point in points),
+        "runs": sum(point["runs"] for point in points),
+        "request_tokens": sum(point["request_tokens"] for point in points),
+        "response_tokens": sum(point["response_tokens"] for point in points),
+        "total_tokens": sum(point["total_tokens"] for point in points),
+        "estimated_cost_usd": str(
+            sum((Decimal(point["estimated_cost_usd"]) for point in points), Decimal("0"))
+        ),
+        "points": points,
+        "users": [
+            {
+                "user_id": row[0],
+                "email": row[1],
+                "runs": int(row[2]),
+                "total_tokens": int(row[3]),
+                "estimated_cost_usd": str(row[4]),
+            }
+            for row in user_rows
+        ],
+        "models": [
+            {
+                "provider": row[0],
+                "model": row[1],
+                "attempts": int(row[2]),
+                "total_tokens": int(row[3]),
+                "estimated_cost_usd": str(row[4]),
+                "average_latency_ms": int(row[5]) if row[5] is not None else None,
+            }
+            for row in model_rows
+        ],
+    }
 
 
 async def overview() -> dict[str, int | str]:
@@ -112,6 +272,9 @@ async def add_allowlist_entry(
 ) -> AccessAllowlist:
     now = datetime.now(UTC)
     async with get_session_factory()() as session, session.begin():
+        account = await session.scalar(
+            select(UserAccount).where(UserAccount.email == email).with_for_update()
+        )
         existing = await session.scalar(
             select(AccessAllowlist).where(AccessAllowlist.email == email).with_for_update()
         )
@@ -120,18 +283,30 @@ async def add_allowlist_entry(
             if role:
                 existing.role_on_registration = role
             existing.updated_at = now
-            return existing
-        entry = AccessAllowlist(
-            id=str(uuid4()),
-            email=email,
-            status="active",
-            role_on_registration=role,
-            created_by_user_id=actor_user_id,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(entry)
-        await session.flush()
+            entry = existing
+        else:
+            entry = AccessAllowlist(
+                id=str(uuid4()),
+                email=email,
+                status="active",
+                role_on_registration=role,
+                created_by_user_id=actor_user_id,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(entry)
+            await session.flush()
+        if role == "admin" and account is not None:
+            assigned = await session.get(UserRole, (account.id, "admin"))
+            if assigned is None:
+                session.add(
+                    UserRole(
+                        user_id=account.id,
+                        role="admin",
+                        granted_by_user_id=actor_user_id,
+                        granted_at=now,
+                    )
+                )
         return entry
 
 

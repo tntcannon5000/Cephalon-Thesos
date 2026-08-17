@@ -167,6 +167,51 @@ class AdminOverviewResponse(BaseModel):
     live_workers: int
 
 
+AdminMetricsPeriod = Literal["15m", "hour", "day", "week", "month", "year"]
+
+
+class AdminMetricPoint(BaseModel):
+    started_at: datetime
+    attempts: int
+    runs: int
+    request_tokens: int
+    response_tokens: int
+    total_tokens: int
+    estimated_cost_usd: str
+
+
+class AdminUserUsage(BaseModel):
+    user_id: str
+    email: str
+    runs: int
+    total_tokens: int
+    estimated_cost_usd: str
+
+
+class AdminModelUsage(BaseModel):
+    provider: str
+    model: str
+    attempts: int
+    total_tokens: int
+    estimated_cost_usd: str
+    average_latency_ms: int | None
+
+
+class AdminMetricsResponse(BaseModel):
+    period: AdminMetricsPeriod
+    starts_at: datetime
+    ends_at: datetime
+    attempts: int
+    runs: int
+    request_tokens: int
+    response_tokens: int
+    total_tokens: int
+    estimated_cost_usd: str
+    points: list[AdminMetricPoint]
+    users: list[AdminUserUsage]
+    models: list[AdminModelUsage]
+
+
 class AdminUserResponse(BaseModel):
     id: str
     email: str

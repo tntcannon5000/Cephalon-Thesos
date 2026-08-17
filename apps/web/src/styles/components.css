@@ -920,6 +920,49 @@ form.composer-shell {
   pointer-events: auto;
 }
 
+.intro-auth-actions {
+  display: grid;
+  gap: 11px;
+  text-align: center;
+}
+
+.intro-auth-actions > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.intro-auth-actions > div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.intro-auth-actions button {
+  display: flex;
+  min-height: 39px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-soft);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  clip-path: var(--clip-small);
+  cursor: pointer;
+}
+
+.intro-auth-actions button:hover,
+.intro-auth-actions button:focus-visible {
+  color: var(--assistant);
+  border-color: var(--accent-dim);
+  outline: 0;
+}
+
+.intro-auth-actions button.is-primary {
+  color: var(--selection-text);
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
 .intro-name-form {
   display: grid;
   gap: 7px;
