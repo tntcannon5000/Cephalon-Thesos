@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
 import { useOptionalAuth } from "../features/auth/AuthContext";
-import { apiFetch } from "../transport/http";
+import { apiFetch, httpErrorDetailMessage } from "../transport/http";
 
 export function AccountControl() {
   const auth = useOptionalAuth();
@@ -52,8 +52,8 @@ export function AccountControl() {
       setCurrentPassword("");
       setReplacementPassword("");
       setPasswordConfirmation("");
-    } catch {
-      setNotice("The password could not be changed. Check your current password and try again.");
+    } catch (error) {
+      setNotice(httpErrorDetailMessage(error) ?? "The current password is incorrect.");
     }
   };
   if (!user) return null;
@@ -81,8 +81,8 @@ export function AccountControl() {
             {changingPassword ? (
               <form className="allowance-form" onSubmit={(event) => void submitPassword(event)}>
                 <label>Current password<input required type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
-                <label>New password<input required type="password" autoComplete="new-password" minLength={15} maxLength={128} value={replacementPassword} onChange={(event) => setReplacementPassword(event.target.value)} /></label>
-                <label>Confirm password<input required type="password" autoComplete="new-password" minLength={15} maxLength={128} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} /></label>
+                <label>New password<input required type="password" autoComplete="new-password" minLength={8} maxLength={128} value={replacementPassword} onChange={(event) => setReplacementPassword(event.target.value)} /><small>Use uppercase, lowercase, a number, and a symbol.</small></label>
+                <label>Confirm password<input required type="password" autoComplete="new-password" minLength={8} maxLength={128} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} /></label>
                 <button type="submit">Change password</button>
                 <button type="button" onClick={() => setChangingPassword(false)}>Cancel</button>
               </form>

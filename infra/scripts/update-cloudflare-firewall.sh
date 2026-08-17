@@ -10,6 +10,12 @@ state_dir=/etc/thesos/firewall
 cidr_file="${state_dir}/cloudflare-ips-v4.txt"
 candidate=$(mktemp)
 trap 'rm -f "${candidate}"' EXIT
+public_interface=$(ip -4 route show default | awk 'NR == 1 {print $5}')
+
+if [[ -z "${public_interface}" ]]; then
+  echo "Could not determine the public network interface." >&2
+  exit 1
+fi
 
 install -d -m 0700 -o root -g root "${state_dir}"
 
@@ -50,9 +56,11 @@ iptables -F THESOS-WEB-INGRESS
 iptables -A THESOS-WEB-INGRESS \
   -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 iptables -A THESOS-WEB-INGRESS \
+  -i "${public_interface}" \
   -m set --match-set thesos_cloudflare4 src \
   -p tcp -m multiport --dports 80,443 -j RETURN
 iptables -A THESOS-WEB-INGRESS \
+  -i "${public_interface}" \
   -p tcp -m multiport --dports 80,443 -j DROP
 iptables -A THESOS-WEB-INGRESS -j RETURN
 

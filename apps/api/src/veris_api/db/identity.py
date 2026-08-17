@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import uuid4
 
 from sqlalchemy import delete, select, update
@@ -25,7 +26,26 @@ from veris_api.security import device_digest, keyed_digest, random_token
 
 @dataclass(frozen=True)
 class RegistrationResult:
-    created: bool
+    outcome: Literal[
+        "created",
+        "not_approved",
+        "pending_verification",
+        "account_exists",
+        "account_unavailable",
+    ]
+    email: str | None = None
+    token: str | None = None
+
+
+@dataclass(frozen=True)
+class EmailActionIssueResult:
+    outcome: Literal[
+        "issued",
+        "account_not_found",
+        "already_verified",
+        "verification_required",
+        "account_unavailable",
+    ]
     email: str | None = None
     token: str | None = None
 
@@ -137,14 +157,17 @@ async def register_account(
         allowlist = await session.scalar(
             select(AccessAllowlist).where(AccessAllowlist.email == email).with_for_update()
         )
-        existing = await session.scalar(select(UserAccount.id).where(UserAccount.email == email))
-        if (
-            allowlist is None
-            or allowlist.status != "active"
-            or allowlist.claimed_by_user_id is not None
-            or existing is not None
-        ):
-            return RegistrationResult(created=False)
+        existing = await session.scalar(select(UserAccount).where(UserAccount.email == email))
+        if existing is not None:
+            if existing.status == "pending_verification":
+                return RegistrationResult(outcome="pending_verification")
+            if existing.status == "active":
+                return RegistrationResult(outcome="account_exists")
+            return RegistrationResult(outcome="account_unavailable")
+        if allowlist is None or allowlist.status != "active":
+            return RegistrationResult(outcome="not_approved")
+        if allowlist.claimed_by_user_id is not None:
+            return RegistrationResult(outcome="account_unavailable")
 
         user_id = str(uuid4())
         account = UserAccount(
@@ -186,7 +209,7 @@ async def register_account(
         session.add(action)
         allowlist.claimed_by_user_id = user_id
         allowlist.updated_at = now
-        return RegistrationResult(created=True, email=email, token=token)
+        return RegistrationResult(outcome="created", email=email, token=token)
 
 
 async def create_access_request(
@@ -222,7 +245,7 @@ async def issue_action_token_for_email(
     purpose: str,
     *,
     settings: Settings | None = None,
-) -> tuple[str, str] | None:
+) -> EmailActionIssueResult:
     runtime = settings or get_settings()
     now = datetime.now(UTC)
     async with get_session_factory()() as session, session.begin():
@@ -230,11 +253,17 @@ async def issue_action_token_for_email(
             select(UserAccount).where(UserAccount.email == email).with_for_update()
         )
         if account is None:
-            return None
-        if purpose == "verify_email" and account.status != "pending_verification":
-            return None
-        if purpose == "reset_password" and account.status not in {"active", "suspended"}:
-            return None
+            return EmailActionIssueResult(outcome="account_not_found")
+        if purpose == "verify_email":
+            if account.status == "active":
+                return EmailActionIssueResult(outcome="already_verified")
+            if account.status != "pending_verification":
+                return EmailActionIssueResult(outcome="account_unavailable")
+        if purpose == "reset_password":
+            if account.status == "pending_verification":
+                return EmailActionIssueResult(outcome="verification_required")
+            if account.status not in {"active", "suspended"}:
+                return EmailActionIssueResult(outcome="account_unavailable")
         await session.execute(
             update(EmailActionToken)
             .where(
@@ -253,7 +282,7 @@ async def issue_action_token_for_email(
             settings=runtime,
         )
         session.add(action)
-        return account.email, token
+        return EmailActionIssueResult(outcome="issued", email=account.email, token=token)
 
 
 async def verify_email_token(token: str, *, settings: Settings | None = None) -> bool:

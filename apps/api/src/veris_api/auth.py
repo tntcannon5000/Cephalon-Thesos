@@ -173,19 +173,41 @@ async def verify_login(
     verifier = material.password_hash or dummy_password_hash()
     async with _password_semaphore:
         verified, replacement = await asyncio.to_thread(verify_password, password, verifier)
-    if (
-        not verified
-        or material.user_id is None
-        or material.status != "active"
-        or not material.password_hash
-    ):
+    if not verified or material.user_id is None or not material.password_hash:
         return None
+    if material.status == "pending_verification":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "email_verification_required",
+                "message": "Verify your email before logging in.",
+            },
+        )
+    if material.status == "suspended":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "account_suspended",
+                "message": "This account is suspended. Please contact the Thesos team for help.",
+            },
+        )
+    if material.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "account_unavailable",
+                "message": "This account is unavailable. Please contact the Thesos team for help.",
+            },
+        )
 
     if "admin" in material.roles and material.mfa and material.mfa.confirmed_at:
         if not mfa_code:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": "mfa_required"},
+                detail={
+                    "code": "mfa_required",
+                    "message": "Enter your administrator authentication code.",
+                },
             )
         secret = decrypt_mfa_secret(material.mfa.encrypted_secret)
         valid_totp = pyotp.TOTP(secret).verify(mfa_code.replace(" ", ""), valid_window=1)
@@ -194,7 +216,13 @@ async def verify_login(
             recovery_digest = keyed_digest(mfa_code.casefold(), "mfa-recovery")
             valid_recovery = await consume_recovery_code(material.user_id, recovery_digest)
         if not valid_totp and not valid_recovery:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "mfa_invalid",
+                    "message": "The authentication code is incorrect.",
+                },
+            )
     if replacement:
         await update_password_hash(material.user_id, replacement)
     return material

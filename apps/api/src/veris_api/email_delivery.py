@@ -58,17 +58,20 @@ async def send_action_email(
         )
         return
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {runtime.resend_api_key}"},
-            json={
-                "from": runtime.email_from,
-                "to": [recipient],
-                "subject": subject,
-                "text": text,
-                "html": markup,
-            },
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {runtime.resend_api_key}"},
+                json={
+                    "from": runtime.email_from,
+                    "to": [recipient],
+                    "subject": subject,
+                    "text": text,
+                    "html": markup,
+                },
+            )
+    except httpx.HTTPError as error:
+        raise EmailDeliveryError("Transactional email provider is unreachable") from error
     if response.status_code >= 300:
         raise EmailDeliveryError(f"Transactional email failed with status {response.status_code}")

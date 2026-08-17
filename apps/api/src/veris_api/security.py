@@ -43,10 +43,21 @@ def normalize_email(value: str) -> str:
 
 def normalize_password(value: str) -> str:
     normalized = unicodedata.normalize("NFC", value)
-    if len(normalized) < 15:
-        raise PasswordPolicyError("Password must contain at least 15 characters")
+    if len(normalized) < 8:
+        raise PasswordPolicyError("Password must contain at least 8 characters")
     if len(normalized) > 128:
         raise PasswordPolicyError("Password must contain at most 128 characters")
+    missing: list[str] = []
+    if not any(character.isupper() for character in normalized):
+        missing.append("an uppercase letter")
+    if not any(character.islower() for character in normalized):
+        missing.append("a lowercase letter")
+    if not any(character.isdigit() for character in normalized):
+        missing.append("a number")
+    if not any(not character.isalnum() and not character.isspace() for character in normalized):
+        missing.append("a symbol")
+    if missing:
+        raise PasswordPolicyError(f"Password must include {', '.join(missing)}")
     if normalized.casefold() in COMMON_PASSWORDS:
         raise PasswordPolicyError("Choose a less common password")
     return normalized

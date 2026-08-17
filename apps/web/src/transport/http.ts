@@ -9,6 +9,15 @@ export class HttpError extends Error {
   }
 }
 
+export function httpErrorDetailMessage(error: unknown): string | null {
+  if (!(error instanceof HttpError) || typeof error.detail !== "object" || !error.detail) {
+    return null;
+  }
+  if (!("message" in error.detail)) return null;
+  const message = (error.detail as { message?: unknown }).message;
+  return typeof message === "string" ? message : null;
+}
+
 function cookieValue(name: string): string | null {
   const prefix = `${name}=`;
   const value = document.cookie

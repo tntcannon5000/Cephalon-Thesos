@@ -53,13 +53,6 @@ from veris_api.turnstile import verify_turnstile
 router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
 
-GENERIC_REGISTRATION = GenericAuthResponse(
-    message="If this address is eligible, a verification message will arrive shortly."
-)
-GENERIC_EMAIL = GenericAuthResponse(
-    message="If an eligible account matches, an email will arrive shortly."
-)
-
 
 @router.get("/auth/config", response_model=PublicAuthConfig)
 async def public_auth_config() -> PublicAuthConfig:
@@ -78,11 +71,13 @@ def _rate_limit_response(error: RateLimitExceededError) -> HTTPException:
     )
 
 
-async def _send_without_disclosure(email: str, purpose: str, token: str) -> None:
+async def _send_action_email(email: str, purpose: str, token: str) -> bool:
     try:
         await send_action_email(email, purpose, token)
     except EmailDeliveryError:
         logger.exception("Transactional email delivery failed for purpose=%s", purpose)
+        return False
+    return True
 
 
 async def _validated_password_hash(password: str) -> str:
@@ -113,15 +108,57 @@ async def register(
     password_hash = await _validated_password_hash(body.password)
     result = await register_account(body.email, password_hash, body.terms_version)
     ensure_device_cookie(request, response, settings=settings)
-    if result.created and result.email and result.token:
-        await _send_without_disclosure(result.email, "verify_email", result.token)
-        await record_audit_event(
-            "account.registered",
-            "user",
-            subject_id=None,
-            ip_pseudonym=signal,
+    registration_errors = {
+        "not_approved": (
+            status.HTTP_403_FORBIDDEN,
+            "email_not_approved",
+            "This email address has not been approved for the private alpha.",
+        ),
+        "pending_verification": (
+            status.HTTP_409_CONFLICT,
+            "verification_pending",
+            "An account for this email is waiting for verification. Use Resend verification below.",
+        ),
+        "account_exists": (
+            status.HTTP_409_CONFLICT,
+            "account_exists",
+            "An account already exists for this email. Log in or reset your password.",
+        ),
+        "account_unavailable": (
+            status.HTTP_403_FORBIDDEN,
+            "account_unavailable",
+            "This account cannot be registered. Please contact the Thesos team for help.",
+        ),
+    }
+    if result.outcome in registration_errors:
+        response_status, code, message = registration_errors[result.outcome]
+        raise HTTPException(
+            status_code=response_status,
+            detail={"code": code, "message": message},
         )
-    return GENERIC_REGISTRATION
+    if not result.email or not result.token:
+        raise RuntimeError("Created registration did not include an email action token")
+    delivered = await _send_action_email(result.email, "verify_email", result.token)
+    await record_audit_event(
+        "account.registered",
+        "user",
+        subject_id=None,
+        ip_pseudonym=signal,
+    )
+    if not delivered:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "verification_delivery_failed",
+                "message": (
+                    "Your account was created, but we could not send the verification email. "
+                    "Please try Resend verification in a moment."
+                ),
+            },
+        )
+    return GenericAuthResponse(
+        message="Account created. Check your email to verify it before logging in."
+    )
 
 
 @router.post("/auth/verify-email", response_model=GenericAuthResponse)
@@ -142,9 +179,39 @@ async def resend_verification(body: EmailRequest, request: Request) -> GenericAu
     except RateLimitExceededError as error:
         raise _rate_limit_response(error) from error
     issued = await issue_action_token_for_email(body.email, "verify_email")
-    if issued:
-        await _send_without_disclosure(issued[0], "verify_email", issued[1])
-    return GENERIC_EMAIL
+    if issued.outcome == "account_not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "account_not_found",
+                "message": "No account was found for this email address.",
+            },
+        )
+    if issued.outcome == "already_verified":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "already_verified",
+                "message": "This email address is already verified. You can log in.",
+            },
+        )
+    if issued.outcome != "issued" or not issued.email or not issued.token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "account_unavailable",
+                "message": "A verification email cannot be sent for this account.",
+            },
+        )
+    if not await _send_action_email(issued.email, "verify_email", issued.token):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "verification_delivery_failed",
+                "message": "We could not send the verification email. Please try again shortly.",
+            },
+        )
+    return GenericAuthResponse(message="A new verification email has been sent.")
 
 
 @router.post("/auth/password/forgot", response_model=GenericAuthResponse)
@@ -155,9 +222,39 @@ async def forgot_password(body: EmailRequest, request: Request) -> GenericAuthRe
     except RateLimitExceededError as error:
         raise _rate_limit_response(error) from error
     issued = await issue_action_token_for_email(body.email, "reset_password")
-    if issued:
-        await _send_without_disclosure(issued[0], "reset_password", issued[1])
-    return GENERIC_EMAIL
+    if issued.outcome == "account_not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "account_not_found",
+                "message": "No account was found for this email address.",
+            },
+        )
+    if issued.outcome == "verification_required":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "email_verification_required",
+                "message": "Verify this email address before resetting its password.",
+            },
+        )
+    if issued.outcome != "issued" or not issued.email or not issued.token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "account_unavailable",
+                "message": "A password reset cannot be started for this account.",
+            },
+        )
+    if not await _send_action_email(issued.email, "reset_password", issued.token):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "password_reset_delivery_failed",
+                "message": "We could not send the password reset email. Please try again shortly.",
+            },
+        )
+    return GenericAuthResponse(message="A password reset link has been sent to your email.")
 
 
 @router.post("/auth/password/reset", response_model=GenericAuthResponse)
@@ -195,7 +292,10 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Gen
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "invalid_credentials"},
+            detail={
+                "code": "invalid_credentials",
+                "message": "The email or password is incorrect.",
+            },
         )
     issued = await issue_login_session(
         material,
@@ -235,7 +335,10 @@ async def change_password(body: ChangePasswordRequest, request: Request) -> Gene
     if not verified:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "invalid_credentials"},
+            detail={
+                "code": "invalid_credentials",
+                "message": "The current password is incorrect.",
+            },
         )
     replacement = await _validated_password_hash(body.password)
     await update_password_hash(identity.user_id, replacement)

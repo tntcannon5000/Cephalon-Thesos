@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../features/auth/AuthContext";
+import { httpErrorDetailMessage } from "../transport/http";
 
 interface AuthActionPageProps {
   action: "verify" | "reset";
@@ -53,8 +54,8 @@ export function AuthActionPage({ action }: AuthActionPageProps) {
     try {
       setMessage(await auth.resetPassword(token, password, confirmation));
       setComplete(true);
-    } catch {
-      setMessage("This reset link is invalid or has expired.");
+    } catch (error) {
+      setMessage(httpErrorDetailMessage(error) ?? "This reset link is invalid or has expired.");
     }
   };
 
@@ -67,8 +68,8 @@ export function AuthActionPage({ action }: AuthActionPageProps) {
         <p>{message}</p>
         {action === "reset" && !complete ? (
           <form className="auth-form" onSubmit={(event) => void submit(event)}>
-            <label><span>New password</span><div className="auth-field"><input required type="password" minLength={15} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></div></label>
-            <label><span>Confirm password</span><div className="auth-field"><input required type="password" minLength={15} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></label>
+            <label><span>New password</span><div className="auth-field"><input required type="password" minLength={8} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></div><small>Use uppercase, lowercase, a number, and a symbol.</small></label>
+            <label><span>Confirm password</span><div className="auth-field"><input required type="password" minLength={8} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div></label>
             <button className="auth-submit" type="submit"><span>Replace password</span><ArrowRight size={18} /></button>
           </form>
         ) : null}

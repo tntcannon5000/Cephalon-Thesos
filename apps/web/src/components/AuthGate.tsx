@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useState, type FormEvent } from "react";
 
 import { useAuth } from "../features/auth/AuthContext";
-import { HttpError } from "../transport/http";
+import { HttpError, httpErrorDetailMessage } from "../transport/http";
 import { ThesosBrand } from "./ThesosBrand";
 import { TurnstileWidget } from "./TurnstileWidget";
 
@@ -11,12 +11,27 @@ type Mode = "login" | "register" | "request" | "forgot" | "resend";
 
 function errorMessage(error: unknown): string {
   if (error instanceof HttpError) {
-    if (error.code === "invalid_credentials") return "Those credentials were not accepted.";
+    if (error.code === "invalid_credentials") return "The email or password is incorrect.";
+    if (error.code === "email_verification_required") return "Verify your email before logging in. You can request a new verification link below.";
+    if (error.code === "account_suspended") return "This account is suspended. Please contact the Thesos team for help.";
+    if (error.code === "account_unavailable") return "This account is unavailable. Please contact the Thesos team for help.";
+    if (error.code === "mfa_invalid") return "The authentication code is incorrect.";
     if (error.code === "rate_limited") return "Too many attempts. Please wait before trying again.";
     if (error.code === "terms_version_changed") return "The terms changed. Please submit again.";
+    const detailMessage = httpErrorDetailMessage(error);
+    if (detailMessage) return detailMessage;
     if (error.status === 422) return "Please check the fields and try again.";
+    if (error.status >= 500) return "Thesos could not complete the request. Please try again shortly.";
   }
-  return "The Archive link could not complete that request.";
+  return "Thesos could not reach the server. Check your connection and try again.";
+}
+
+function pendingLabel(mode: Mode): string {
+  if (mode === "login") return "Signing in...";
+  if (mode === "register") return "Creating account...";
+  if (mode === "request") return "Sending request...";
+  if (mode === "resend") return "Sending verification...";
+  return "Sending reset link...";
 }
 
 export function AuthGate() {
@@ -110,14 +125,14 @@ export function AuthGate() {
           {mode === "login" || mode === "register" ? (
             <label>
               <span>Password</span>
-              <div className="auth-field"><Key size={17} weight="thin" /><input required type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 15 : 1} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></div>
-              {mode === "register" ? <small>Use at least 15 characters.</small> : null}
+              <div className="auth-field"><Key size={17} weight="thin" /><input required type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 8 : 1} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} /></div>
+              {mode === "register" ? <small>Use 8 or more characters, including uppercase, lowercase, a number, and a symbol.</small> : null}
             </label>
           ) : null}
           {mode === "register" ? (
             <label>
               <span>Confirm password</span>
-              <div className="auth-field"><Key size={17} weight="thin" /><input required type="password" autoComplete="new-password" minLength={15} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div>
+              <div className="auth-field"><Key size={17} weight="thin" /><input required type="password" autoComplete="new-password" minLength={8} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></div>
             </label>
           ) : null}
           {mode === "login" && mfaRequired ? (
@@ -142,7 +157,7 @@ export function AuthGate() {
             type="submit"
             disabled={pending || (mode === "request" && Boolean(auth.config.turnstile_site_key) && !turnstileToken)}
           >
-            <span>{pending ? "Opening link" : mode === "login" ? "Enter" : mode === "register" ? "Create account" : mode === "request" ? "Request access" : mode === "resend" ? "Send verification link" : "Send reset link"}</span>
+            <span>{pending ? pendingLabel(mode) : mode === "login" ? "Enter" : mode === "register" ? "Create account" : mode === "request" ? "Request access" : mode === "resend" ? "Send verification link" : "Send reset link"}</span>
             <ArrowRight size={18} weight="thin" />
           </button>
         </form>

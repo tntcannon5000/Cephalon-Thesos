@@ -45,10 +45,11 @@ async def test_private_alpha_registration_ownership_quota_and_admin_mfa(
     await _truncate_private_alpha_data()
     captured: dict[str, list[str]] = defaultdict(list)
 
-    async def capture_email(_: str, purpose: str, token: str) -> None:
+    async def capture_email(_: str, purpose: str, token: str) -> bool:
         captured[purpose].append(token)
+        return True
 
-    monkeypatch.setattr(auth_routes, "_send_without_disclosure", capture_email)
+    monkeypatch.setattr(auth_routes, "_send_action_email", capture_email)
     admin_email = "alpha-admin@example.com"
     tester_email = "alpha-tester@example.com"
     password = "Archive passage phrase 2026!"
@@ -85,8 +86,29 @@ async def test_private_alpha_registration_ownership_quota_and_admin_mfa(
                     "terms_version": terms_version,
                 },
             )
-            assert unapproved.status_code == 200
+            assert unapproved.status_code == 403
+            assert unapproved.json()["detail"]["code"] == "email_not_approved"
             assert len(captured["verify_email"]) == 2
+
+            pending_login = await public.post(
+                "/api/v1/auth/login",
+                json={"email": tester_email, "password": password},
+            )
+            assert pending_login.status_code == 403
+            assert pending_login.json()["detail"]["code"] == "email_verification_required"
+
+            duplicate_pending = await public.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": tester_email,
+                    "password": password,
+                    "password_confirmation": password,
+                    "accept_terms": True,
+                    "terms_version": terms_version,
+                },
+            )
+            assert duplicate_pending.status_code == 409
+            assert duplicate_pending.json()["detail"]["code"] == "verification_pending"
 
             for token in captured["verify_email"]:
                 verified = await public.post(
