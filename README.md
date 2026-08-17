@@ -26,6 +26,8 @@ infra          Deployment-oriented service definitions
 scripts        Local development and verification entry points
 ```
 
-The hosted runtime contract and recovery checks are documented in `docs/runbooks/PHASE_3A_OPERATIONS.md`.
+The hosted runtime contract and recovery checks are documented in
+`docs/runbooks/PHASE_3A_OPERATIONS.md`. Private-alpha identity, access bootstrap, quotas, and
+administration are documented in `docs/runbooks/PHASE_3B_PRIVATE_ALPHA.md`.
 
 This is an unofficial fan project and is not affiliated with Digital Extremes.

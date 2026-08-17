@@ -26,7 +26,7 @@ async def event_stream() -> AsyncIterator[AgentStreamEvent]:
     )
     yield PartDeltaEvent(
         index=0,
-        delta=ToolCallPartDelta(args_delta='fourth word fifth word.'),
+        delta=ToolCallPartDelta(args_delta="fourth word fifth word."),
     )
     yield PartDeltaEvent(
         index=0,
@@ -51,9 +51,7 @@ async def test_answer_snapshots_are_progressive_and_final(
 ) -> None:
     recorded: list[tuple[str, dict[str, object]]] = []
 
-    async def record_event(
-        run_id: str, event_type: str, payload: dict[str, object]
-    ) -> int:
+    async def record_event(run_id: str, event_type: str, payload: dict[str, object]) -> int:
         assert run_id == "run-1"
         recorded.append((event_type, payload))
         return len(recorded)
@@ -63,9 +61,7 @@ async def test_answer_snapshots_are_progressive_and_final(
     await agent_events.persist_agent_events_for_run("run-1", event_stream())
 
     snapshots = [
-        payload["text"]
-        for event_type, payload in recorded
-        if event_type == "answer.snapshot"
+        payload["text"] for event_type, payload in recorded if event_type == "answer.snapshot"
     ]
     assert snapshots == [
         "First word second word third word ",

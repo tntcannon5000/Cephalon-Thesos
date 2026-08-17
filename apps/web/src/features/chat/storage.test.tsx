@@ -2,7 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Conversation } from "./types";
-import { createConversationBranch, useConversationStore } from "./storage";
+import {
+  createConversationBranch,
+  isConversationPersistable,
+  useConversationStore,
+} from "./storage";
 
 describe("useConversationStore", () => {
   beforeEach(() => localStorage.clear());
@@ -116,5 +120,34 @@ describe("useConversationStore", () => {
     };
 
     expect(createConversationBranch(source, "assistant-1")).toBeNull();
+  });
+
+  it("persists a stopped conversation after pre-response cancellation", () => {
+    const conversation: Conversation = {
+      id: "stopped",
+      title: "Cancelled request",
+      titleState: "pending",
+      pinned: false,
+      updatedAt: "2026-08-16T10:00:00.000Z",
+      terminated: false,
+      activity: { kind: "stopped", label: "Stopped" },
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: "Stop this request",
+          createdAt: "2026-08-16T10:00:00.000Z",
+          state: "complete",
+        },
+      ],
+    };
+
+    expect(isConversationPersistable(conversation)).toBe(true);
+    expect(
+      isConversationPersistable({
+        ...conversation,
+        activity: { kind: "thinking", label: "Thinking" },
+      }),
+    ).toBe(false);
   });
 });

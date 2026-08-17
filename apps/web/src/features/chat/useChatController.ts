@@ -15,7 +15,7 @@ function now(): string {
 }
 
 function assistantId(userMessageId: string): string {
-  return `v-${userMessageId.slice(2)}`;
+  return `v-${userMessageId}`;
 }
 
 function payloadText(value: unknown, fallback: string): string {
@@ -74,8 +74,8 @@ function finalizeCancelledConversation(
   };
 }
 
-export function useChatController(displayName: string | null = null) {
-  const store = useConversationStore();
+export function useChatController(displayName: string | null = null, userId?: string) {
+  const store = useConversationStore(userId);
   const [draft, setDraft] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);

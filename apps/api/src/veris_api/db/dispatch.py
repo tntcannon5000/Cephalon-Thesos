@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 
 from veris_api.config import get_settings
-from veris_api.db.models import AgentEvent, AgentRun, RuntimeWorker
+from veris_api.db.models import AgentEvent, AgentRun, DailyUsageLedger, RuntimeWorker
 from veris_api.db.session import get_session_factory
 
 
@@ -98,6 +98,14 @@ async def release_run_for_retry(run_id: str, worker_id: str, error_code: str) ->
         if run.dispatch_attempts >= settings.worker_max_dispatch_attempts:
             run.status = "failed"
             run.error_code = error_code
+            await session.execute(
+                update(DailyUsageLedger)
+                .where(
+                    DailyUsageLedger.run_id == run_id,
+                    DailyUsageLedger.status == "reserved",
+                )
+                .values(status="released", released_at=now)
+            )
             session.add(
                 _append_event(
                     run,

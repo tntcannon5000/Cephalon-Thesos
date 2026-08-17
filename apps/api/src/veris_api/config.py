@@ -49,6 +49,28 @@ class Settings(BaseSettings):
     dbos_system_database_url: str = "postgresql://thesos:thesos-local-only@127.0.0.1:5432/thesos"
 
     session_cookie_secure: bool = False
+    session_digest_key: str = "thesos-development-session-key"
+    ip_hmac_key: str = "thesos-development-ip-key"
+    admin_mfa_encryption_key: str = "thesos-development-mfa-key"
+    trusted_proxy_cidrs: tuple[str, ...] = ("127.0.0.1/32", "::1/128")
+    terms_version: str = "2026-08-17-private-alpha"
+    public_base_url: str = "http://127.0.0.1:5173"
+    session_idle_hours: int = Field(default=24 * 7, ge=1, le=24 * 30)
+    session_absolute_hours: int = Field(default=24 * 30, ge=1, le=24 * 90)
+    admin_session_idle_minutes: int = Field(default=30, ge=5, le=240)
+    admin_session_absolute_hours: int = Field(default=8, ge=1, le=24)
+    recent_auth_minutes: int = Field(default=15, ge=5, le=60)
+    base_daily_run_limit: int = Field(default=10, ge=1, le=1000)
+    device_daily_run_limit: int = Field(default=10, ge=1, le=1000)
+    ip_daily_run_limit: int = Field(default=10, ge=1, le=1000)
+    global_daily_run_limit: int = Field(default=100, ge=1, le=100_000)
+    max_user_concurrent_runs: int = Field(default=2, ge=1, le=10)
+    email_delivery: Literal["file", "resend"] = "file"
+    email_from: str = "Thesos <archives@localhost>"
+    resend_api_key: str = ""
+    development_mail_directory: Path = REPO_ROOT / "var" / "dev-mail"
+    turnstile_secret_key: str = ""
+    turnstile_site_key: str = ""
     database_pool_size: int = Field(default=5, ge=1, le=20)
     database_max_overflow: int = Field(default=5, ge=0, le=20)
     dbos_database_pool_size: int = Field(default=5, ge=2, le=20)
@@ -86,6 +108,20 @@ class Settings(BaseSettings):
                 raise ValueError("Production session cookies must be secure")
             if not self.openrouter_api_key:
                 raise ValueError("Production OPENROUTER_API_KEY is required")
+            required_secrets = {
+                "THESOS_SESSION_DIGEST_KEY": self.session_digest_key,
+                "THESOS_IP_HMAC_KEY": self.ip_hmac_key,
+                "THESOS_ADMIN_MFA_ENCRYPTION_KEY": self.admin_mfa_encryption_key,
+            }
+            for name, value in required_secrets.items():
+                if len(value) < 32 or "development" in value:
+                    raise ValueError(f"Production {name} must be an independent strong secret")
+            if self.email_delivery != "resend" or not self.resend_api_key:
+                raise ValueError("Production transactional email requires Resend configuration")
+            if not self.turnstile_secret_key or not self.turnstile_site_key:
+                raise ValueError("Production Turnstile configuration is required")
+            if not self.trusted_proxy_cidrs:
+                raise ValueError("Production trusted proxy CIDRs are required")
             if "local-only" in self.database_url or "local-only" in self.dbos_system_database_url:
                 raise ValueError("Production database credentials cannot use local defaults")
         return self

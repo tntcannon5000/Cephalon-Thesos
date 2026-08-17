@@ -59,11 +59,6 @@ export function IntroSequence({ onComplete }: IntroSequenceProps) {
                 exit={{ opacity: 0, y: 6 }}
                 transition={{ duration: reducedMotion ? 0 : 0.42 }}
               >
-                <div className="intro-auth-actions" aria-label="Account access">
-                  <button type="button">Sign in</button>
-                  <button type="button">Register</button>
-                </div>
-                <div className="intro-divider" aria-hidden="true"><i /><span>or</span><i /></div>
                 <form
                   className="intro-name-form"
                   onSubmit={(event) => {
@@ -76,7 +71,7 @@ export function IntroSequence({ onComplete }: IntroSequenceProps) {
                     onComplete(normalized);
                   }}
                 >
-                  <label htmlFor="intro-display-name">Enter your name</label>
+                  <label htmlFor="intro-display-name">How should I address you?</label>
                   <div className="intro-name-field">
                     <input
                       id="intro-display-name"

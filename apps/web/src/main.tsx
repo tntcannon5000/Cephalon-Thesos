@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 
 import { App } from "./app/App";
+import { AuthProvider } from "./features/auth/AuthProvider";
 import { installFrontendConsoleCapture } from "./features/developer/logStore";
 import { ThemeProvider } from "./features/theme/ThemeProvider";
 import "./styles/global.css";
@@ -19,7 +20,9 @@ createRoot(root).render(
   <StrictMode>
     <BrowserRouter>
       <ThemeProvider>
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>
   </StrictMode>,

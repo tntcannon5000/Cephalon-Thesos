@@ -3,30 +3,37 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import secrets
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
-from fastapi import Cookie, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from starlette.middleware.base import RequestResponseEndpoint
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from veris_api.auth import ensure_device_cookie, require_csrf, require_identity
 from veris_api.config import get_settings
 from veris_api.db.dispatch import worker_is_live
+from veris_api.db.quota import ConcurrentRunLimitError, QuotaExceededError
 from veris_api.db.repository import (
     ConversationTerminatedError,
     MessageNotFoundError,
     create_run,
     edit_message,
     events_after,
-    get_run_for_session,
+    get_run_for_user,
     request_run_cancellation,
 )
 from veris_api.db.session import dispose_engine, get_engine
 from veris_api.developer_logs import configure_developer_logging, get_developer_log_buffer
+from veris_api.routers.admin import router as admin_router
+from veris_api.routers.auth import router as auth_router
+from veris_api.routers.conversations import router as conversations_router
+from veris_api.routers.me import router as me_router
 from veris_api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
@@ -36,7 +43,6 @@ from veris_api.schemas import (
 )
 
 TERMINAL_EVENTS = {"run.completed", "run.failed", "run.cancelled", "conversation.terminated"}
-SESSION_COOKIE = "veris_session"
 logger = logging.getLogger(__name__)
 
 
@@ -64,12 +70,29 @@ def create_app() -> FastAPI:
         allow_origins=[settings.web_origin],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Content-Type", "Idempotency-Key"],
+        allow_headers=["Content-Type", "Idempotency-Key", "X-CSRF-Token"],
     )
+    configured_host = urlparse(settings.web_origin).hostname
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=[
+            host for host in (configured_host, "127.0.0.1", "localhost", "testserver") if host
+        ],
+    )
+    app.include_router(auth_router)
+    app.include_router(me_router)
+    app.include_router(admin_router)
+    app.include_router(conversations_router)
 
     @app.middleware("http")
     async def log_request(request: Request, call_next: RequestResponseEndpoint) -> Response:
         started_at = time.perf_counter()
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            if (origin and origin != settings.web_origin) or (
+                settings.environment == "production" and not origin
+            ):
+                return Response(status_code=status.HTTP_403_FORBIDDEN)
         try:
             response = await call_next(request)
         except Exception:
@@ -84,6 +107,7 @@ def create_app() -> FastAPI:
                 response.status_code,
                 elapsed_ms,
             )
+        ensure_device_cookie(request, response, settings=settings)
         return response
 
     @app.get("/api/v1/health/live")
@@ -106,7 +130,8 @@ def create_app() -> FastAPI:
         return {"status": "ready"}
 
     @app.get("/api/v1/suggestions")
-    async def suggestions() -> dict[str, list[dict[str, str]]]:
+    async def suggestions(request: Request) -> dict[str, list[dict[str, str]]]:
+        await require_identity(request)
         return {
             "suggestions": [
                 {
@@ -168,32 +193,37 @@ def create_app() -> FastAPI:
     )
     async def create_agent_run(
         body: CreateRunRequest,
+        request: Request,
         response: Response,
         idempotency_key: str = Header(alias="Idempotency-Key", min_length=8, max_length=64),
-        veris_session: str | None = Cookie(default=None),
     ) -> CreateRunResponse:
-        session_id = veris_session or secrets.token_urlsafe(32)
+        identity = await require_identity(request)
+        require_csrf(request, identity)
         try:
             created = await create_run(
                 body,
-                session_id=session_id,
+                session_id=identity.session_id,
                 idempotency_key=idempotency_key,
+                user_id=identity.user_id,
+                auth_session_id=identity.session_id,
             )
         except ConversationTerminatedError as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "conversation_terminated"},
             ) from error
-
-        if veris_session is None:
-            response.set_cookie(
-                SESSION_COOKIE,
-                session_id,
-                httponly=True,
-                secure=settings.session_cookie_secure,
-                samesite="lax",
-                max_age=60 * 60 * 24 * 30,
-            )
+        except QuotaExceededError as error:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"code": "allowance_exhausted"},
+            ) from error
+        except ConcurrentRunLimitError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "concurrent_run_limit"},
+            ) from error
+        except MessageNotFoundError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
         if created.created:
             logger.info(
                 "Queued run %s for conversation %s",
@@ -209,11 +239,10 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/runs/{run_id}", response_model=RunSnapshot)
     async def run_snapshot(
         run_id: str,
-        veris_session: str | None = Cookie(default=None),
+        request: Request,
     ) -> RunSnapshot:
-        if veris_session is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-        run = await get_run_for_session(run_id, veris_session)
+        identity = await require_identity(request)
+        run = await get_run_for_user(run_id, identity.user_id)
         if run is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         return RunSnapshot(
@@ -231,10 +260,10 @@ def create_app() -> FastAPI:
     async def stream_events(
         run_id: str,
         request: Request,
-        veris_session: str | None = Cookie(default=None),
         last_event_id: int = Header(default=0, alias="Last-Event-ID"),
     ) -> StreamingResponse:
-        if veris_session is None or await get_run_for_session(run_id, veris_session) is None:
+        identity = await require_identity(request)
+        if await get_run_for_user(run_id, identity.user_id) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
         async def event_stream() -> AsyncIterator[str]:
@@ -271,9 +300,11 @@ def create_app() -> FastAPI:
     @app.delete("/api/v1/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def cancel_agent_run(
         run_id: str,
-        veris_session: str | None = Cookie(default=None),
+        request: Request,
     ) -> Response:
-        if veris_session is None or await get_run_for_session(run_id, veris_session) is None:
+        identity = await require_identity(request)
+        require_csrf(request, identity)
+        if await get_run_for_user(run_id, identity.user_id) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         await request_run_cancellation(run_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -286,15 +317,16 @@ def create_app() -> FastAPI:
         conversation_id: str,
         message_id: str,
         _: EditMessageRequest,
-        veris_session: str | None = Cookie(default=None),
+        request: Request,
     ) -> EditMessageResponse:
-        if veris_session is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        identity = await require_identity(request)
+        require_csrf(request, identity)
         try:
             removed = await edit_message(
                 conversation_id,
                 message_id,
-                session_id=veris_session,
+                session_id=identity.session_id,
+                user_id=identity.user_id,
             )
         except MessageNotFoundError as error:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error

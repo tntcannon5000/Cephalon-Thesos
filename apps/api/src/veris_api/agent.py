@@ -18,6 +18,7 @@ from pydantic_ai.usage import UsageLimits
 from veris_api.agent_events import persist_agent_events
 from veris_api.config import get_settings
 from veris_api.db.provider_usage import record_provider_attempts
+from veris_api.db.quota import charge_allowance
 from veris_api.db.repository import (
     add_event,
     finalize_run,
@@ -79,6 +80,7 @@ async def mark_working(
     if not await set_run_status(run_id, "working"):
         await mark_run_cancelled(run_id)
         raise asyncio.CancelledError
+    await charge_allowance(run_id)
     await add_event(
         run_id,
         "status.changed",

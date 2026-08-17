@@ -1,5 +1,6 @@
 import type { CreateRunPayload, CreateRunResponse, RunEvent } from "../features/chat/types";
 import { emitFrontendLog } from "../features/developer/logStore";
+import { csrfToken } from "./http";
 
 export class ApiError extends Error {
   constructor(
@@ -23,6 +24,7 @@ export async function createRun(payload: CreateRunPayload): Promise<CreateRunRes
     headers: {
       "Content-Type": "application/json",
       "Idempotency-Key": crypto.randomUUID(),
+      ...(csrfToken() ? { "X-CSRF-Token": csrfToken() as string } : {}),
     },
     body: JSON.stringify(payload),
   });
@@ -120,7 +122,10 @@ export async function editMessage(
     {
       method: "PATCH",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(csrfToken() ? { "X-CSRF-Token": csrfToken() as string } : {}),
+      },
       body: JSON.stringify({ replacement }),
     },
   );
@@ -136,7 +141,11 @@ export async function cancelRun(cancelUrl: string): Promise<void> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const response = await fetch(cancelUrl, { method: "DELETE", credentials: "include" });
+      const response = await fetch(cancelUrl, {
+        method: "DELETE",
+        credentials: "include",
+        headers: csrfToken() ? { "X-CSRF-Token": csrfToken() as string } : {},
+      });
       if (response.ok || response.status === 404) {
         emitFrontendLog("info", "transport.runs", "Run cancellation confirmed", {
           attempt,

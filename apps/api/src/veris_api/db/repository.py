@@ -11,7 +11,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from veris_api.config import get_settings
-from veris_api.db.models import AgentEvent, AgentRun, MessageControl
+from veris_api.db.models import (
+    AgentEvent,
+    AgentRun,
+    ConversationMessageRecord,
+    ConversationRecord,
+    MessageControl,
+)
+from veris_api.db.quota import release_reserved_allowance, reserve_allowance
 from veris_api.db.session import get_session_factory
 from veris_api.schemas import ConversationMessage, CreateRunRequest
 
@@ -41,24 +48,36 @@ async def create_run(
     *,
     session_id: str,
     idempotency_key: str,
+    user_id: str | None = None,
+    auth_session_id: str | None = None,
 ) -> CreatedRun:
     settings = get_settings()
     model_route = (settings.openrouter_model, *settings.openrouter_fallback_models)
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        ownership_filter = (
+            AgentRun.user_id == user_id
+            if user_id is not None
+            else AgentRun.session_id == session_id
+        )
         existing = await session.scalar(
             select(AgentRun.id).where(
-                AgentRun.session_id == session_id,
+                ownership_filter,
                 AgentRun.idempotency_key == idempotency_key,
             )
         )
         if existing:
             return CreatedRun(existing, created=False)
 
+        message_owner_filter = (
+            MessageControl.user_id == user_id
+            if user_id is not None
+            else MessageControl.session_id == session_id
+        )
         terminated = await session.scalar(
             select(MessageControl.id).where(
                 MessageControl.conversation_id == request.conversation_id,
-                MessageControl.session_id == session_id,
+                message_owner_filter,
                 MessageControl.active.is_(True),
                 MessageControl.safety_action == "terminate_conversation",
             )
@@ -69,6 +88,7 @@ async def create_run(
         max_ordinal = await session.scalar(
             select(func.max(MessageControl.ordinal)).where(
                 MessageControl.conversation_id == request.conversation_id,
+                message_owner_filter,
                 MessageControl.active.is_(True),
             )
         )
@@ -76,11 +96,105 @@ async def create_run(
         now = datetime.now(UTC)
         run_id = str(uuid4())
 
+        history_json = [message.model_dump() for message in request.history]
+        if user_id is not None:
+            conversation = await session.get(
+                ConversationRecord,
+                request.conversation_id,
+                with_for_update=True,
+            )
+            if conversation is not None and conversation.user_id != user_id:
+                raise MessageNotFoundError
+            if conversation is None:
+                conversation = ConversationRecord(
+                    id=request.conversation_id,
+                    user_id=user_id,
+                    title=request.message[:80],
+                    title_state="pending",
+                    pinned=False,
+                    terminated=False,
+                    revision=1,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(conversation)
+                await session.flush()
+                for index, message in enumerate(request.history, start=1):
+                    session.add(
+                        ConversationMessageRecord(
+                            id=message.id,
+                            conversation_id=request.conversation_id,
+                            user_id=user_id,
+                            ordinal=index,
+                            role=message.role,
+                            content=message.content,
+                            state="complete",
+                            created_at=now,
+                        )
+                    )
+            else:
+                persisted_messages = list(
+                    await session.scalars(
+                        select(ConversationMessageRecord)
+                        .where(ConversationMessageRecord.conversation_id == request.conversation_id)
+                        .order_by(ConversationMessageRecord.ordinal)
+                    )
+                )
+                persisted_current = next(
+                    (item for item in persisted_messages if item.id == request.message_id),
+                    None,
+                )
+                if persisted_current is not None and (
+                    persisted_current.role != "user" or persisted_current.content != request.message
+                ):
+                    raise MessageNotFoundError
+                history_json = [
+                    {"id": item.id, "role": item.role, "content": item.content}
+                    for item in persisted_messages
+                    if item.id != request.message_id
+                ]
+                history_json = history_json[-20:]
+            next_message_ordinal = (
+                await session.scalar(
+                    select(func.max(ConversationMessageRecord.ordinal)).where(
+                        ConversationMessageRecord.conversation_id == request.conversation_id
+                    )
+                )
+                or 0
+            ) + 1
+            if conversation is not None and not await session.get(
+                ConversationMessageRecord, request.message_id
+            ):
+                session.add(
+                    ConversationMessageRecord(
+                        id=request.message_id,
+                        conversation_id=request.conversation_id,
+                        user_id=user_id,
+                        ordinal=next_message_ordinal,
+                        role="user",
+                        content=request.message,
+                        state="complete",
+                        created_at=now,
+                    )
+                )
+            conversation.updated_at = now
+            conversation.revision += 1
+            await reserve_allowance(
+                session,
+                user_id,
+                run_id,
+                auth_session_id=auth_session_id,
+                settings=settings,
+                now=now,
+            )
+
         session.add(
             MessageControl(
                 id=request.message_id,
                 conversation_id=request.conversation_id,
                 session_id=session_id,
+                user_id=user_id,
+                auth_session_id=auth_session_id,
                 ordinal=ordinal,
                 role="user",
                 content_hash=hash_content(request.message),
@@ -95,12 +209,14 @@ async def create_run(
                 conversation_id=request.conversation_id,
                 user_message_id=request.message_id,
                 session_id=session_id,
+                user_id=user_id,
+                auth_session_id=auth_session_id,
                 idempotency_key=idempotency_key,
                 status="accepted",
                 model=settings.openrouter_model,
                 request_text=request.message,
                 user_display_name=request.display_name,
-                history_json=[message.model_dump() for message in request.history],
+                history_json=history_json,
                 last_event_sequence=1,
                 dispatch_attempts=0,
                 next_attempt_at=now,
@@ -128,7 +244,7 @@ async def create_run(
             async with session_factory() as retry_session:
                 existing = await retry_session.scalar(
                     select(AgentRun.id).where(
-                        AgentRun.session_id == session_id,
+                        ownership_filter,
                         AgentRun.idempotency_key == idempotency_key,
                     )
                 )
@@ -142,6 +258,13 @@ async def get_run_for_session(run_id: str, session_id: str) -> AgentRun | None:
     async with get_session_factory()() as session:
         return await session.scalar(
             select(AgentRun).where(AgentRun.id == run_id, AgentRun.session_id == session_id)
+        )
+
+
+async def get_run_for_user(run_id: str, user_id: str) -> AgentRun | None:
+    async with get_session_factory()() as session:
+        return await session.scalar(
+            select(AgentRun).where(AgentRun.id == run_id, AgentRun.user_id == user_id)
         )
 
 
@@ -238,6 +361,7 @@ async def finalize_run(
             run.answer_text = answer
         if error_code is not None:
             run.error_code = error_code
+        await _persist_conversation_result(session, run, status, events, answer, now)
         if message_id is not None and safety_action is not None:
             await session.execute(
                 update(MessageControl)
@@ -281,6 +405,14 @@ async def mark_run_cancelled(run_id: str) -> bool:
         run.lease_expires_at = None
         if isinstance(partial_answer, str) and partial_answer:
             run.answer_text = partial_answer
+            await _persist_conversation_result(
+                session,
+                run,
+                "cancelled",
+                [],
+                partial_answer,
+                datetime.now(UTC),
+            )
 
         sequence = await _allocate_event_sequence(session, run)
         session.add(
@@ -308,6 +440,7 @@ async def request_run_cancellation(run_id: str) -> bool:
         run.updated_at = now
         if run.status == "accepted":
             run.status = "cancelled"
+            await release_reserved_allowance(session, run_id, now=now)
             sequence = await _allocate_event_sequence(session, run)
             session.add(
                 AgentEvent(
@@ -332,18 +465,81 @@ async def request_run_cancellation(run_id: str) -> bool:
         return True
 
 
+async def _persist_conversation_result(
+    session: AsyncSession,
+    run: AgentRun,
+    status: str,
+    events: list[tuple[str, dict[str, Any]]],
+    answer: str | None,
+    now: datetime,
+) -> None:
+    if run.user_id is None:
+        return
+    conversation = await session.scalar(
+        select(ConversationRecord)
+        .where(
+            ConversationRecord.id == run.conversation_id,
+            ConversationRecord.user_id == run.user_id,
+        )
+        .with_for_update()
+    )
+    if conversation is None:
+        return
+    if status == "terminated":
+        conversation.terminated = True
+    for event_type, payload in events:
+        if event_type == "conversation.titled" and isinstance(payload.get("title"), str):
+            conversation.title = str(payload["title"])[:80]
+            conversation.title_state = "generated"
+    if answer:
+        assistant_id = f"v-{run.user_message_id}"
+        message = await session.get(ConversationMessageRecord, assistant_id)
+        if message is None:
+            ordinal = (
+                await session.scalar(
+                    select(func.max(ConversationMessageRecord.ordinal)).where(
+                        ConversationMessageRecord.conversation_id == run.conversation_id
+                    )
+                )
+                or 0
+            ) + 1
+            session.add(
+                ConversationMessageRecord(
+                    id=assistant_id,
+                    conversation_id=run.conversation_id,
+                    user_id=run.user_id,
+                    ordinal=ordinal,
+                    role="assistant",
+                    content=answer,
+                    state="complete",
+                    created_at=now,
+                )
+            )
+        else:
+            message.content = answer
+            message.state = "complete"
+    conversation.updated_at = now
+    conversation.revision += 1
+
+
 async def edit_message(
     conversation_id: str,
     message_id: str,
     *,
     session_id: str,
+    user_id: str | None = None,
 ) -> list[str]:
     async with get_session_factory()() as session, session.begin():
+        owner_filter = (
+            MessageControl.user_id == user_id
+            if user_id is not None
+            else MessageControl.session_id == session_id
+        )
         target = await session.scalar(
             select(MessageControl).where(
                 MessageControl.id == message_id,
                 MessageControl.conversation_id == conversation_id,
-                MessageControl.session_id == session_id,
+                owner_filter,
                 MessageControl.active.is_(True),
             )
         )
@@ -353,7 +549,7 @@ async def edit_message(
         removed = await session.scalars(
             select(MessageControl.id).where(
                 MessageControl.conversation_id == conversation_id,
-                MessageControl.session_id == session_id,
+                owner_filter,
                 MessageControl.active.is_(True),
                 MessageControl.ordinal >= target.ordinal,
             )
@@ -362,10 +558,28 @@ async def edit_message(
         await session.execute(
             delete(MessageControl).where(
                 MessageControl.conversation_id == conversation_id,
-                MessageControl.session_id == session_id,
+                owner_filter,
                 MessageControl.ordinal >= target.ordinal,
             )
         )
+        if user_id is not None:
+            conversation_message = await session.get(
+                ConversationMessageRecord,
+                message_id,
+            )
+            if conversation_message and conversation_message.user_id == user_id:
+                await session.execute(
+                    delete(ConversationMessageRecord).where(
+                        ConversationMessageRecord.conversation_id == conversation_id,
+                        ConversationMessageRecord.user_id == user_id,
+                        ConversationMessageRecord.ordinal >= conversation_message.ordinal,
+                    )
+                )
+                conversation = await session.get(ConversationRecord, conversation_id)
+                if conversation:
+                    conversation.terminated = False
+                    conversation.updated_at = datetime.now(UTC)
+                    conversation.revision += 1
         return removed_ids
 
 

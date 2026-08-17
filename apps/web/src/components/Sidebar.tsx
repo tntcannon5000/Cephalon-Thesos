@@ -32,8 +32,11 @@ interface SidebarProps {
 }
 
 function relativeDate(timestamp: string): string {
-  const hours = Math.max(1, Math.round((Date.now() - Date.parse(timestamp)) / 3_600_000));
-  return hours < 24 ? `${hours}h` : `${Math.round(hours / 24)}d`;
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - Date.parse(timestamp)) / 60_000));
+  if (elapsedMinutes < 1) return "now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m`;
+  const hours = Math.floor(elapsedMinutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
 export function Sidebar({

@@ -17,7 +17,11 @@ from veris_api.db.dispatch import (
     renew_run_lease,
 )
 from veris_api.db.repository import mark_run_cancelled
-from veris_api.db.retention import purge_expired_runs, purge_stale_workers
+from veris_api.db.retention import (
+    purge_expired_runs,
+    purge_expired_security_data,
+    purge_stale_workers,
+)
 
 _launched = False
 _tasks_by_run: dict[str, asyncio.Task[None]] = {}
@@ -147,6 +151,7 @@ async def run_worker_loop(worker_id: str, stop_event: asyncio.Event) -> None:
         now = monotonic()
         if now >= next_retention_at:
             purged_ids = await purge_expired_runs()
+            await purge_expired_security_data()
             await purge_stale_workers()
             for run_id in purged_ids:
                 with suppress(Exception):

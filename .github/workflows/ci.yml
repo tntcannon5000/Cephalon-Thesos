@@ -67,6 +67,13 @@ jobs:
           POSTGRES_PASSWORD: compose-validation-only
           DATABASE_URL: postgresql+psycopg://thesos:compose-validation-only@postgres:5432/thesos
           DBOS_SYSTEM_DATABASE_URL: postgresql://thesos:compose-validation-only@postgres:5432/thesos
+          SESSION_DIGEST_KEY: compose-validation-session-secret-000000000000
+          IP_HMAC_KEY: compose-validation-ip-secret-000000000000000
+          ADMIN_MFA_ENCRYPTION_KEY: compose-validation-mfa-secret-0000000000000
+          EMAIL_FROM: Thesos CI <ci@example.com>
+          RESEND_API_KEY: compose-validation-only
+          TURNSTILE_SITE_KEY: compose-validation-only
+          TURNSTILE_SECRET_KEY: compose-validation-only
           OPENROUTER_API_KEY: compose-validation-only
           OPENROUTER_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
           OPENROUTER_FALLBACK_MODELS: '["openai/gpt-oss-120b:free"]'

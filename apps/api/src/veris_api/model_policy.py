@@ -41,5 +41,5 @@ def validate_model_route(
     if paid and not allow_paid:
         names = ", ".join(sorted(paid))
         raise ValueError(
-            "Paid OpenRouter models require OPENROUTER_ALLOW_PAID_MODELS=true: " f"{names}"
+            f"Paid OpenRouter models require OPENROUTER_ALLOW_PAID_MODELS=true: {names}"
         )

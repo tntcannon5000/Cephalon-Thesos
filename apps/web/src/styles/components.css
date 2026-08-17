@@ -920,45 +920,6 @@ form.composer-shell {
   pointer-events: auto;
 }
 
-.intro-auth-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.intro-auth-actions button {
-  height: 36px;
-  color: var(--text-soft);
-  font-size: 11px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  clip-path: var(--clip-small);
-  cursor: pointer;
-}
-
-.intro-auth-actions button:hover,
-.intro-auth-actions button:focus-visible {
-  color: var(--veris-text);
-  border-color: var(--veris-dim);
-  background: var(--surface-hover);
-}
-
-.intro-divider {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 10px;
-  margin: 14px 0 12px;
-  color: var(--muted-dim);
-  font-size: 9px;
-  text-transform: uppercase;
-}
-
-.intro-divider i {
-  height: 1px;
-  background: var(--line);
-}
-
 .intro-name-form {
   display: grid;
   gap: 7px;

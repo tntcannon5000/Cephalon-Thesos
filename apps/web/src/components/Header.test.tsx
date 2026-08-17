@@ -18,8 +18,8 @@ describe("Header", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Developer mode" }));
 
     expect(onDeveloperModeChange).toHaveBeenCalledWith(true);
-    expect(screen.getByRole("button", { name: "Log in" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign up" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Log in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign up" })).not.toBeInTheDocument();
     expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
   });
 

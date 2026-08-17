@@ -2,6 +2,7 @@ import { List, TerminalWindow } from "@phosphor-icons/react";
 import { AnimatePresence, motion } from "motion/react";
 
 import type { Conversation } from "../features/chat/types";
+import { AccountControl } from "./AccountControl";
 
 interface HeaderProps {
   developerMode: boolean;
@@ -61,8 +62,7 @@ export function Header({
             </motion.span>
           </label>
         ) : null}
-        <button className="header-action" type="button">Log in</button>
-        <button className="header-action is-primary" type="button">Sign up</button>
+        <AccountControl />
         <button className="mobile-menu-button" type="button" onClick={onOpenMenu} aria-label="Open menu">
           <List size={24} weight="thin" />
         </button>

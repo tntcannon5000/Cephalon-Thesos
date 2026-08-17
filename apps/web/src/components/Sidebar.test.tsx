@@ -48,6 +48,7 @@ describe("Sidebar transmissions", () => {
 
     expect(screen.getByText("Pinned topic")).toBeInTheDocument();
     expect(screen.getByText("Recent topic")).toBeInTheDocument();
+    expect(screen.getAllByText("now")).toHaveLength(2);
     expect(screen.queryByText(/Right click a transmission/)).not.toBeInTheDocument();
   });
 
