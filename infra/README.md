@@ -1,4 +1,5 @@
 # Infrastructure
 
-The local alpha defaults to SQLite so it can run without a resident database service. The production profile uses PostgreSQL for application and DBOS state. `compose.yaml` provides a development PostgreSQL service when Docker is available; the OCI deployment manifest will be added in the infrastructure phase.
+PostgreSQL is authoritative for both application and DBOS state in development and production. `scripts/dev.ps1` starts the database from `compose.yaml`, migrates it, then runs the API, agent worker, and Vite as separate processes. SQLite is retained only for isolated unit tests.
 
+The production-shaped topology is defined in `infra/compose.production.yaml`. It keeps PostgreSQL private, serves the static frontend through Caddy, and runs migrations, API traffic, model work, and backups as separate container roles.

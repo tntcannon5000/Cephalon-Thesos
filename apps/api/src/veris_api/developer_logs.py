@@ -103,6 +103,15 @@ def get_developer_log_buffer() -> DeveloperLogBuffer:
     return _developer_buffer
 
 
+def configure_console_logging(level: str = "INFO") -> None:
+    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=numeric_level,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    logging.getLogger("veris_api").setLevel(numeric_level)
+
+
 def configure_developer_logging(level: str = "INFO") -> None:
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     with _configuration_lock:

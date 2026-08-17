@@ -10,10 +10,11 @@ Requirements:
 - pnpm
 - Python 3.12
 - uv
+- PostgreSQL 18, either installed locally or available through Docker
 
-Run `Launch Thesos.cmd` from Windows Explorer, or run `scripts/dev.ps1` from PowerShell. The launcher installs locked dependencies, prepares the local database, starts both services, waits for readiness, and opens the app.
+Run `Launch Thesos.cmd` from Windows Explorer, or run `scripts/dev.ps1` from PowerShell. The launcher installs locked dependencies, starts PostgreSQL when Docker is available, applies migrations, then starts the API, agent worker, and frontend as separate processes. It opens the app only after both API and worker health checks pass.
 
-The zero-install local profile uses SQLite. Deployment configuration targets PostgreSQL by changing `DATABASE_URL` and `DBOS_SYSTEM_DATABASE_URL`; application code and migrations use SQLAlchemy-compatible schemas.
+PostgreSQL is authoritative for application and DBOS state in development and production. SQLite is used only by isolated unit tests. The local PostgreSQL URL and role are documented in `.env.example`; production topology and operations live under `infra/`.
 
 ## Repository layout
 
@@ -24,5 +25,7 @@ docs           Product, architecture, prompting, and visual references
 infra          Deployment-oriented service definitions
 scripts        Local development and verification entry points
 ```
+
+The hosted runtime contract and recovery checks are documented in `docs/runbooks/PHASE_3A_OPERATIONS.md`.
 
 This is an unofficial fan project and is not affiliated with Digital Extremes.

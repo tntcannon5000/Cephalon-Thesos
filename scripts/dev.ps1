@@ -8,6 +8,7 @@ $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $apiRoot = Join-Path $repoRoot "apps\api"
 $webUrl = "http://127.0.0.1:5173"
 $apiHealth = "http://127.0.0.1:8000/api/v1/health/ready"
+$workerHealth = "http://127.0.0.1:8000/api/v1/health/worker"
 
 function Stop-ProcessTree {
     param([int]$RootProcessId)
@@ -22,6 +23,8 @@ function Stop-ProcessTree {
 
 Set-Location $repoRoot
 
+$usingDockerPostgres = $false
+
 if (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".env"))) {
     Copy-Item -LiteralPath (Join-Path $repoRoot ".env.example") -Destination (Join-Path $repoRoot ".env")
 }
@@ -29,6 +32,20 @@ if (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".env"))) {
 if (-not $SkipInstall) {
     pnpm install --frozen-lockfile
     uv sync --project $apiRoot --frozen
+}
+
+if (Get-Command "docker" -ErrorAction SilentlyContinue) {
+    docker compose up -d --wait postgres
+    $usingDockerPostgres = $true
+} else {
+    $postgresService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $postgresService) {
+        throw "PostgreSQL is not installed and Docker is unavailable. Install either one, then retry."
+    }
+    if ($postgresService.Status -ne "Running") {
+        Start-Service -Name $postgresService.Name
+    }
 }
 
 New-Item -ItemType Directory -Path (Join-Path $repoRoot "data") -Force | Out-Null
@@ -46,6 +63,12 @@ $api = Start-Process -FilePath $pythonExecutable -ArgumentList @(
     -RedirectStandardOutput (Join-Path $logRoot "api.out.log") `
     -RedirectStandardError (Join-Path $logRoot "api.err.log")
 
+$worker = Start-Process -FilePath $pythonExecutable -ArgumentList @(
+    "-m", "veris_api.worker"
+) -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru `
+    -RedirectStandardOutput (Join-Path $logRoot "worker.out.log") `
+    -RedirectStandardError (Join-Path $logRoot "worker.err.log")
+
 $web = Start-Process -FilePath $pnpmExecutable -ArgumentList @(
     "--filter", "@thesos/web", "dev", "--host", "127.0.0.1", "--port", "5173", "--strictPort"
 ) -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru `
@@ -61,9 +84,13 @@ try {
         if ($web.HasExited) {
             throw "Thesos web app stopped during startup. Check data\logs\web.err.log."
         }
+        if ($worker.HasExited) {
+            throw "Thesos worker stopped during startup. Check data\logs\worker.err.log."
+        }
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri $apiHealth -TimeoutSec 2
-            if ($response.StatusCode -eq 200) {
+            $workerResponse = Invoke-WebRequest -UseBasicParsing -Uri $workerHealth -TimeoutSec 2
+            if ($response.StatusCode -eq 200 -and $workerResponse.StatusCode -eq 200) {
                 $ready = $true
                 break
             }
@@ -82,11 +109,14 @@ try {
 
     Write-Host "Thesos is running at $webUrl"
     Write-Host "Press Ctrl+C to stop both services."
-    Wait-Process -Id $api.Id, $web.Id
+    Wait-Process -Id $api.Id, $worker.Id, $web.Id
 } finally {
-    foreach ($process in @($api, $web)) {
+    foreach ($process in @($api, $worker, $web)) {
         if ($process) {
             Stop-ProcessTree -RootProcessId $process.Id
         }
+    }
+    if ($usingDockerPostgres) {
+        docker compose stop postgres | Out-Null
     }
 }

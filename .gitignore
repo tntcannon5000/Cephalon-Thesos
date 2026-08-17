@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+infra/production.env
 *.pem
 *.key
 
@@ -44,4 +45,3 @@ Thumbs.db
 design-qa.local.md
 test-results/
 playwright-report/
-

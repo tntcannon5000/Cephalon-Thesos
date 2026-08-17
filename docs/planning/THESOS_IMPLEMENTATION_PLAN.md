@@ -1,11 +1,13 @@
 # Thesos: Full Implementation Plan
 
-Status: proposed implementation baseline  
+Status: revised implementation baseline with an early hosted private-alpha track
 Scope: frontend, backend, corpus and retrieval, LLM integration, agent runtime, operations  
 Primary deployment: one OCI ARM64 VM with PostgreSQL, Caddy, and Docker Compose  
 Related documents: `scribbledoc.md`, `THESOS_VM_MANIFEST.md`, `THESOS_PROMPTING_NOTES.md`
 
 This document defines how Thesos should be built. It is deliberately more specific than a product brief: it establishes component boundaries, data contracts, control flow, safety limits, testing expectations, and release gates.
+
+The current delivery order inserts Phases 3A-3C between the generic LLM loop and corpus work. These phases move the existing prototype onto PostgreSQL, add allowlisted authentication and enforceable usage limits, and deploy a deliberately small private alpha at `cephalonthesos.com`. This does not declare the ungrounded Phase 3 model intelligent or production-ready; the hosted alpha remains visibly labelled as an early, non-source-backed evaluation build while permission and corpus work are pending.
 
 Where this document conflicts with the current VM manifest, this document represents the newer application decision. The manifest should be amended before deployment.
 
@@ -23,6 +25,7 @@ The product must feel like consulting a knowledgeable system, but correctness an
 - Support long research without allowing unbounded autonomous loops.
 - Remain affordable on a two-core, 12 GB ARM64 host.
 - Preserve user privacy by default and avoid permanent chat storage unless explicitly requested.
+- Support a mandatory-login private alpha without turning account creation into public self-service registration.
 
 ## 2. Architectural Principles
 
@@ -63,6 +66,8 @@ Avoid a large client state framework initially. Use route state, component reduc
 - PostgreSQL for corpus metadata, runtime state, cache, operations, and DBOS state.
 - BM25S for the initial lexical index, stored on the attached volume and memory-mapped by serving processes.
 - Alembic for application-owned schema migrations.
+- `pwdlib[argon2]` for versioned Argon2id password hashing and verification.
+- Resend behind a narrow transactional-email adapter for verification and password-reset messages during the private alpha.
 - `uv` for dependency locking and reproducible environments.
 - Ruff, Pyright, pytest, pytest-asyncio, Hypothesis, and respx.
 
@@ -81,6 +86,9 @@ Avoid a large client state framework initially. Use route state, component reduc
 Browser
   |
   | HTTPS
+  v
+Cloudflare DNS/proxy and Turnstile
+  |
   v
 Caddy
   |-- static pre-rendered React application
@@ -187,7 +195,12 @@ Do not create a generic `utils.py`, `helpers.py`, or single agent module contain
 | `/about` | Pre-rendered | Project purpose, methodology, unofficial status |
 | `/privacy` | Pre-rendered | Data handling and provider disclosure |
 | `/terms` | Pre-rendered | Usage terms and disclaimers |
-| `/admin` | Client-only, protected | Health, ingestion, provider, cache, and eval status |
+| `/login` | Client-only | Email/password login, alpha status, and password recovery |
+| `/register` | Client-only | Allowlisted email/password registration and access-request path |
+| `/verify-email` | Client-only | Consume an emailed verification token without exposing it to server access logs |
+| `/reset-password` | Client-only | Consume an emailed reset token and set a replacement password |
+| `/account` | Client-only, protected | Session, daily allowance, reset time, and allowance requests |
+| `/admin` | Client-only, role-protected | Users, access, usage, provider cost, failures, health, and later corpus operations |
 
 Conversation and shared-answer presentation remain modes of `/`, not separate public content sections. A short share identifier may be represented by a query parameter or history state while keeping the main experience visually unchanged.
 
@@ -195,17 +208,19 @@ Conversation and shared-answer presentation remain modes of `/`, not separate pu
 
 The main route has explicit UI states:
 
-1. **Empty:** Archives prompt, four suggested questions, composer.
-2. **Submitting:** User message committed locally, run being accepted.
-3. **Working:** Assistant activity summary, sources appearing, cancel control.
-4. **Streaming:** Answer text arrives while citations and structured blocks resolve.
-5. **Complete:** Final validated answer, sources, freshness, feedback, follow-ups.
-6. **Needs clarification:** A focused question with preserved prior work.
-7. **Interrupted:** Connection lost; automatic event reconnection shown unobtrusively.
-8. **Failed:** Human-readable reason, retained user prompt, safe retry action.
-9. **Cancelled:** Partial work clearly marked as incomplete.
-10. **Archives unavailable:** Brief non-echoing Thesos response; composer remains available.
-11. **Conversation terminated:** No assistant response; the composer is replaced by a same-scale termination banner with `New chat` and `Edit earlier message` actions.
+1. **Authentication required:** The visual shell remains available, but chat creation is replaced by the private-alpha login action.
+2. **Empty:** Archives prompt, four suggested questions, composer, and unobtrusive remaining-allowance status.
+3. **Submitting:** User message committed locally, run being accepted and one allowance unit reserved.
+4. **Working:** Assistant activity summary, sources appearing, cancel control.
+5. **Streaming:** Answer text arrives while citations and structured blocks resolve.
+6. **Complete:** Final validated answer, sources, freshness, feedback, follow-ups.
+7. **Needs clarification:** A focused question with preserved prior work.
+8. **Interrupted:** Connection lost; automatic event reconnection shown unobtrusively.
+9. **Failed:** Human-readable reason, retained user prompt, safe retry action.
+10. **Cancelled:** Partial work clearly marked as incomplete.
+11. **Allowance exhausted:** Composer is replaced by the reset time and a `Request more` action; existing local conversations remain readable.
+12. **Archives unavailable:** Brief non-echoing Thesos response; composer remains available.
+13. **Conversation terminated:** No assistant response; the composer is replaced by a same-scale termination banner with `New chat` and `Edit earlier message` actions.
 
 ### 6.3 Component boundaries
 
@@ -262,7 +277,7 @@ This allows browser refresh, mobile network interruption, API restart, and event
 - Stop reconnecting after terminal events.
 - Show connection status only when degraded long enough to matter.
 
-Run access is bound to a random anonymous session held in a Secure, HttpOnly, SameSite cookie. IndexedDB stores run IDs and event positions, never a reusable API bearer credential. State-changing requests also require same-origin validation and CSRF protection. Clearing the anonymous session intentionally makes its unshared server-side runs inaccessible.
+Run access is bound to an authenticated account and one server-side session represented by an opaque Secure, HttpOnly, SameSite cookie. IndexedDB stores run IDs and event positions, never an identity-provider token or reusable API bearer credential. State-changing requests require same-origin validation and CSRF protection. Signing out revokes the server session without deleting browser-local conversations; another account on the same browser must not inherit access to the prior account's server-side runs.
 
 ### 6.5 Public event contract
 
@@ -340,7 +355,7 @@ IndexedDB stores:
 
 Local history is the default. Follow-up requests send a bounded conversation window plus an optional generated summary. The UI must make clearing all local data straightforward.
 
-The server stores run content temporarily for execution and recovery. It also retains minimal, content-free active-history control metadata long enough to enforce a termination disposition at the backend. It does not become permanent conversation history unless the user explicitly creates a share or a future account feature changes this policy.
+The server stores run content temporarily for execution and recovery. It also retains minimal, content-free active-history control metadata long enough to enforce a termination disposition at the backend. Creating an account does not silently enable cloud chat history: completed conversations remain browser-local unless the user explicitly creates a share or a later, separately consented synchronization feature changes this policy.
 
 Editing a user message deletes every later turn from that conversation before submitting the replacement. The frontend removes the suffix from IndexedDB and the visible history; the backend atomically removes its corresponding active-history control records and schedules any temporary run content for purge. Content-free aggregate security metrics may remain under their ordinary retention policy. If the deleted suffix contained a terminating message, the composer returns only after the backend confirms the new history and evaluates the replacement. A page refresh or direct API submission cannot clear termination merely by hiding the banner locally.
 
@@ -391,7 +406,21 @@ Application startup must validate configuration, database migrations, writable p
 
 ### 7.2 API surface
 
-Public:
+Unauthenticated:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/auth/register` | Register an allowlisted email and send its verification message |
+| `POST` | `/api/v1/auth/login` | Verify email/password and establish a server session |
+| `POST` | `/api/v1/auth/verify-email` | Consume a single-use email-verification token |
+| `POST` | `/api/v1/auth/resend-verification` | Request another verification message with generic responses |
+| `POST` | `/api/v1/auth/password/forgot` | Request a reset message without revealing account existence |
+| `POST` | `/api/v1/auth/password/reset` | Consume a reset token, replace the credential, and revoke sessions |
+| `POST` | `/api/v1/access-requests` | Request private-alpha access without creating an account |
+| `GET` | `/api/v1/health/live` | Process liveness |
+| `GET` | `/api/v1/health/ready` | Dependency readiness |
+
+Authenticated application:
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -401,14 +430,16 @@ Public:
 | `DELETE` | `/api/v1/runs/{id}` | Request cancellation |
 | `POST` | `/api/v1/runs/{id}/clarification` | Continue a suspended clarification |
 | `GET` | `/api/v1/suggestions` | Reset-aware suggested prompts and cached answers |
-| `POST` | `/api/v1/feedback` | Anonymous structured feedback |
+| `POST` | `/api/v1/feedback` | Authenticated structured feedback |
 | `POST` | `/api/v1/shares` | Explicitly persist a shareable answer snapshot |
 | `GET` | `/api/v1/shares/{id}` | Load a shared snapshot in main-page mode |
 | `PATCH` | `/api/v1/conversations/{id}/messages/{message_id}` | Edit one user message and atomically truncate all later active turns |
-| `GET` | `/api/v1/health/live` | Process liveness |
-| `GET` | `/api/v1/health/ready` | Dependency readiness |
+| `GET` | `/api/v1/me` | Account, role, session, allowance, and reset summary |
+| `POST` | `/api/v1/auth/logout` | Revoke the current server session |
+| `POST` | `/api/v1/auth/password/change` | Change the password after checking the current credential |
+| `POST` | `/api/v1/quota-requests` | Ask an administrator for an additional allowance grant |
 
-Admin endpoints cover service status, ingestion, corpus publication, cache invalidation, provider budgets, recent failures, and eval reports. They require independent authentication and are never protected only by obscurity.
+Admin endpoints under `/api/v1/admin/*` cover allowlist management, user suspension, session revocation, quota grants, pending access/quota requests, aggregate traffic, provider usage and cost, recent failures, service health, and later ingestion and corpus operations. Every endpoint requires the `admin` role, a recently authenticated session for mutations, CSRF protection, and an audit event. Admin authorization is enforced by the backend and never by route visibility alone.
 
 FastAPI's OpenAPI document is the public contract. CI generates TypeScript request, response, event-payload, and error types for the web application and fails when generated artifacts are stale. Handwritten frontend interfaces must not duplicate backend schemas.
 
@@ -433,7 +464,8 @@ Validation rules:
 - Normalize Unicode and line endings without destroying item names.
 - Strip unsupported attachments rather than silently forwarding them.
 - Require an idempotency key so browser retries cannot create duplicate paid runs.
-- Bind run access to the current anonymous server session.
+- Bind run access to the authenticated account and current server session.
+- Atomically reserve one daily allowance unit in the same transaction that accepts a new run; idempotent retries reuse the original reservation.
 - Reject continuation when any server-validated message in the active history has a `terminate_conversation` disposition.
 - Never trust client-supplied safety fields or omission of a previously flagged active message.
 - Record the exact accepted privacy and model policy version.
@@ -471,6 +503,18 @@ Validation rules:
 
 #### Product and operations
 
+- `access_allowlist`
+- `access_request`
+- `user_account`
+- `password_credential`
+- `email_action_token`
+- `auth_session`
+- `user_role`
+- `admin_mfa`
+- `user_device`
+- `daily_usage_ledger`
+- `quota_grant`
+- `quota_request`
 - `answer_cache`
 - `tool_cache`
 - `suggested_prompt`
@@ -485,7 +529,7 @@ DBOS uses its own documented tables or schema. Application migrations must not a
 
 ### 7.5 Runtime retention
 
-Proposed anonymous defaults:
+Proposed private-alpha defaults:
 
 | Data | Retention |
 |---|---|
@@ -495,8 +539,12 @@ Proposed anonymous defaults:
 | Event payloads containing answer text | 24 hours |
 | Aggregate metrics | 90 days or longer if non-identifying |
 | Explicit shared answer | Until user deletion policy or expiry |
-| Security audit event | Based on operational need, content-free |
-| Active message safety disposition | Until the anonymous conversation expires or the message is removed from active history |
+| Account and role record | While access is active, then according to the published deletion policy |
+| Revoked/expired authentication session | 30 days after expiry or revocation |
+| HMAC-pseudonymized IP/device security signal | 30 days unless attached to an unresolved abuse event |
+| Quota ledger and grants | 90 days, then aggregate or delete |
+| Security/admin audit event | 180 days by default, content-free |
+| Active message safety disposition | Until the local conversation expires server-side or the message is removed from active history |
 
 A scheduled purge must enforce retention. Removing content means removing prompts, model text, tool text that contains user material, and answer event deltas, not merely hiding them from the UI.
 
@@ -527,6 +575,65 @@ Cache classes have distinct policies:
 - **Suggested-answer cache:** explicit invalidation at daily or weekly Warframe reset boundaries.
 
 Cache entries store provenance and expiry. Live data is never presented without its observed time. Cache failures must fall back to ordinary execution rather than fail the user request.
+
+### 7.8 Private-alpha identity and access policy
+
+The private alpha uses first-party email/password authentication. Registration deliberately collects only:
+
+- Email address.
+- Password and a client-side confirmation of that same password.
+- Acceptance of the current Terms version, presented with the Privacy notice. This is a legal acknowledgement, not an additional profile field.
+
+Thesos does not require a username, real name, date of birth, phone number, location, Warframe account name, profile image, or demographic information. The optional name currently used by the browser to address the user remains local UI preference data and is not copied into the account automatically.
+
+Account creation remains closed:
+
+- An administrator adds an exact normalized email address to `access_allowlist` or approves an email-only `access_request`.
+- Email normalization is limited to trimming and case normalization. Thesos must not rewrite dots, plus-addressing, or domains.
+- Registering an approved address creates a `pending_verification` account, stores its password verifier, records the accepted Terms version/time, and sends a verification link. An unapproved address creates no account.
+- Registration, recovery, and login responses avoid revealing whether an address is allowlisted, registered, disabled, or merely has the wrong password. Expensive password verification also uses a dummy verifier for unknown addresses to reduce timing differences.
+- Verification and password-reset links carry high-entropy, single-use tokens. Only token digests are stored. Verification tokens expire after 24 hours; reset tokens expire after 30 minutes. The frontend receives tokens in the URL fragment and submits them in a POST body so they do not enter ordinary server access logs or referrer headers.
+- Account states are `pending_verification`, `active`, `suspended`, and `revoked`; only verified active accounts can create sessions or runs.
+- Password reset revokes every existing session. Password change requires the current password and revokes every other session.
+- Changing the account email and linking external identity providers are out of scope for the private alpha because both require separate identity-recovery policy.
+
+Password policy follows modern single-factor guidance:
+
+- Minimum 15 Unicode characters and maximum 128 characters; spaces and password-manager paste are allowed.
+- Normalize Unicode with NFC before hashing, but never trim, change case, or silently truncate a password.
+- No mandatory uppercase, lowercase, digit, or symbol mixture and no periodic password rotation.
+- Reject passwords found in a maintained local blocklist of common/compromised values, including context-specific Thesos terms, without sending the proposed password to an external service.
+- Hash with Argon2id using a unique salt, versioned parameters, and commissioning measurements at or above the current OWASP minimum. Rehash on successful login when policy parameters increase.
+- Never log, encrypt for later recovery, or otherwise retain the submitted password. Only the Argon2id verifier is stored.
+
+Transactional email is sent through a narrow adapter, initially Resend on a dedicated Thesos sending subdomain with SPF, DKIM, and DMARC. Messages contain no prompt/chat content. Delivery failures, bounces, and provider use are observable, while API keys and complete action URLs never enter logs. The privacy notice identifies the email provider and the recipient data it processes.
+
+After login, Thesos issues a high-entropy opaque session token in a `Secure`, `HttpOnly`, `SameSite=Lax`, `__Host-` cookie and stores only its digest server-side. Ordinary sessions start with a seven-day idle and 30-day absolute lifetime; admin sessions use a 30-minute idle and eight-hour absolute lifetime, and sensitive mutations require authentication within the last 15 minutes. Sessions rotate at login and privilege changes, can be revoked individually or per account, and never contain roles or quota claims that can become stale. State-changing routes require a separate CSRF token plus strict Origin/Host checks.
+
+Roles are stored in the database. A one-shot management command seeds the first exact admin email and refuses to run once an admin exists; no permanent environment variable silently re-grants the role. The first administrator must enroll TOTP before accessing admin operations, recovery codes are shown once and stored only as hashes, and all role or access changes are audited. Ordinary-user MFA and optional social login may be added later without changing the account's stable internal ID.
+
+### 7.9 Daily allowance and abuse controls
+
+The private-alpha base allowance is 10 accepted model runs per account per UTC day. The UI shows the remaining allowance and exact reset time. A "request more" form creates a pending `quota_request`; an administrator may issue a dated one-off grant or change an account-specific daily limit without editing application configuration. Separate configurable global daily run, token, cost, and concurrent-generation ceilings protect the service even when every account is individually within quota; exhausting a global ceiling pauses new generations without disabling login, existing-history access, or administration.
+
+Allowance accounting is a PostgreSQL transaction, not an in-memory counter:
+
+1. Run acceptance locks or atomically updates the account/day bucket and creates one `reserved` ledger entry alongside the run.
+2. An idempotent retry returns the existing run and reservation.
+3. The reservation becomes `charged` when the first provider request starts.
+4. Validation failures and dispatch failures before provider work release the reservation.
+5. User cancellation before provider work releases it; cancellation after provider work starts remains charged.
+6. Provider retries, fallbacks, and tool calls within one run remain one user-visible allowance unit while their real token and cost usage is still recorded separately.
+
+The account limit is authoritative. Additional signals defend against automation and account sharing without treating a shared household, university, mobile carrier, or VPN address as one person:
+
+- Caddy accepts the client IP header only from the configured Cloudflare proxy path. The application stores a rotating HMAC pseudonym, never the raw IP in ordinary usage tables.
+- A first-party random device identifier is issued as a security-purpose secure cookie and stored server-side by digest. It is not a canvas, audio, font, GPU, or behavioural fingerprint; its PECR/consent treatment must be reflected accurately in the launch privacy and cookie review.
+- Per-IP and per-device burst limits, daily anomaly thresholds, failed-login limits, and concurrent-run limits sit above the ordinary per-account allowance. They may require Turnstile or administrative review before hard rejection.
+- Turnstile is mandatory on access requests and conditionally required for suspicious login or generation traffic. Its token is always validated server-side.
+- Security signals have short retention, are excluded from model context and ordinary logs, and are described in the privacy/cookie notice.
+
+This layered design makes clearing one cookie insufficient to obtain more account quota, while avoiding invasive fingerprinting and unnecessary false positives. No client-reported remaining count or device identity is trusted for enforcement.
 
 ## 8. Corpus and Retrieval Plan
 
@@ -843,7 +950,7 @@ Every mode also has input-token, output-token, and monetary ceilings from config
 
 Keep this phase deterministic for request handling and unambiguous safety cases:
 
-1. Validate request, anonymous session ownership, idempotency key, and rate limits.
+1. Validate request, authenticated account/session ownership, idempotency key, daily allowance, and abuse limits.
 2. Normalize text and conversation history.
 3. Apply deterministic safety rules before retrieval or tool selection and check active history for a terminating message.
 4. Mark genuinely ambiguous safety interpretation for the existing intent step; do not make a provider call solely to classify harmless topical drift.
@@ -1385,15 +1492,19 @@ The LLM is prohibited from supplying an unvalidated formula string for execution
 ### 13.3 Web security
 
 - Strict Content Security Policy and trusted asset origins.
-- Secure, HttpOnly, SameSite cookies where cookies are used.
-- CSRF protection for cookie-authenticated admin and future account actions.
+- Argon2id password verifiers, breached/common-password blocking, generic auth responses, bounded password-verification concurrency, and account/IP/device login throttling.
+- Single-use, digest-only verification/reset tokens; no password, complete action URL, or token is written to logs.
+- Opaque, revocable server sessions in `__Host-` Secure, HttpOnly, SameSite cookies; no password verifier or role claim is stored in browser-readable state.
+- CSRF protection for every cookie-authenticated mutation, including ordinary run creation and cancellation.
 - Origin and host validation.
 - Request size and content-type enforcement.
-- Per-IP and anonymous-session rate limits in both edge and backend.
-- Turnstile or equivalent challenge only when abuse signals warrant it.
+- Per-account, pseudonymous-device, and HMAC-pseudonymized-IP controls in both edge and backend, with the account allowance authoritative.
+- Turnstile on access requests and risk-triggered authentication/generation traffic, always validated server-side.
 - Markdown and outbound-link sanitization.
 - SSRF-safe source adapters with DNS/IP checks and redirect limits.
-- Independent admin authentication with short sessions and audit logging.
+- Backend role checks, recent-authentication checks for admin mutations, session revocation, and audit logging.
+- Mandatory TOTP and recovery codes for administrators; TOTP secrets are encrypted at rest and recovery codes are stored as hashes.
+- Production developer mode and content-bearing diagnostic logs are unavailable to ordinary users.
 
 ## 14. Observability
 
@@ -1429,6 +1540,9 @@ Record IDs, durations, counts, model route, result class, cache status, corpus r
 - Replan, clarification, no-progress, and verification-repair rates.
 - Citation count, unsupported-claim eval rate, and freshness warnings.
 - User feedback and answer-cache effectiveness.
+- Authenticated active users, successful and failed logins, access requests, quota reservations/charges/releases, allowance denials, and grants.
+- Per-account provider cost and token totals, with admin aggregates that do not expose prompt or answer contents.
+- IP/device anomaly counts and Turnstile outcomes without raw IPs or invasive fingerprint material.
 - Count `archive_unavailable` and `terminate_conversation` actions by policy version without recording prompt content or public topic labels.
 - VM, container, PostgreSQL, disk, backup, and ingestion health.
 
@@ -1441,6 +1555,7 @@ Structured logs include request/run IDs and stable error codes. They exclude raw
 ### 15.1 Ordinary software tests
 
 - Unit tests for normalization, entity aliases, metadata scoring, RRF, context packing, cache keys, rate limits, and state transitions.
+- Unit and integration tests for allowlist checks, registration/verification/reset tokens, Argon2 parameter upgrades, generic auth responses, login throttling, session rotation/revocation, CSRF, admin TOTP, role enforcement, quota races, idempotent reservations, grants, and IP/device privacy boundaries.
 - Property-based tests for calculation engines and agent-loop invariants.
 - Contract tests for every tool adapter using recorded and synthetic payloads.
 - Integration tests against a real PostgreSQL instance.
@@ -1510,6 +1625,10 @@ The VM manifest should be updated before implementation deployment:
 4. Replace the initial local embedding-model directory with a general `/srv/veris/indexes` directory; embeddings remain optional.
 5. Make pgvector extension and vector indexes optional rather than launch requirements.
 6. Budget memory for the agent worker and memory-mapped BM25 index.
+7. Set the initial public origin to `cephalonthesos.com`, with `www` redirected and API traffic remaining same-origin under `/api`.
+8. Add the transactional-email, password-hashing, admin-TOTP, Turnstile, session/CSRF/HMAC, GHCR, deploy-user, backup, and trusted-Cloudflare configuration introduced by Phases 3A-3C.
+9. Make PostgreSQL, the API, the agent worker, and Caddy continuously running; migrations, backups, and future ingestion remain one-shot jobs.
+10. Commission the hosted private alpha before corpus services exist, then add ingestion/index storage without replacing the authentication, quota, or deployment substrate.
 
 Proposed steady-state memory planning:
 
@@ -1646,6 +1765,108 @@ Exit gate:
 - Cancellation and provider failure produce stable terminal states.
 - Hard request, token, time, concurrency, and provisional cost limits are enforced.
 - One network retry cannot create two model runs.
+
+### Phase 3A: Hosted-alpha data and runtime foundation
+
+Implementation checkpoint (2026-08-16): implemented in the repository. PostgreSQL migrations,
+transactional dispatch ownership, API/worker separation, cancellation propagation, provider-attempt
+accounting, retention, production containers, Compose topology, and PostgreSQL integration coverage
+are present. Live local checks passed for stream, cancel, API restart/replay, worker restart, and
+idempotent submission. ARM64 container builds are enforced by CI because this workstation does not
+run a container engine.
+
+Objective: replace local-only shortcuts with the smallest production-shaped substrate needed to host the existing generic loop safely.
+
+Deliver:
+
+- Make PostgreSQL the authoritative application and DBOS database in development and production. SQLite remains permitted only for isolated unit tests that do not claim migration or concurrency coverage.
+- Add a PostgreSQL development profile and a clean-database migration test. Production starts must reject SQLite URLs and unsafe/default secrets.
+- Complete the API/agent-worker process split, transactional dispatch ownership, replayable event sequencing, cancellation propagation, and retention purge required by the existing Phase 2/3 contracts.
+- Record provider route, latency, token usage, estimated cost, cancellation point, and terminal outcome for every model attempt.
+- Produce pinned ARM64 images for the static frontend/Caddy, API, agent worker, migration job, and backup job.
+- Add production Compose definitions with health checks, non-root users, bounded logs, read-only filesystems where practical, explicit persistent mounts, and initial memory/concurrency ceilings.
+- Add one-way, expand-first migration rules. Local prototype data is not copied into production; the hosted alpha begins from a clean PostgreSQL database.
+- Add production configuration validation for the Phase 3A domain/origin, provider keys, PostgreSQL URLs, secure cookies, pool bounds, and retention periods. Extend this fail-closed validation in Phase 3B as trusted proxy mode, transactional email, password hashing, admin TOTP encryption, Turnstile, and session/CSRF/HMAC secrets are introduced.
+
+Database work:
+
+- Recreate the current run, event, message-control, provider-usage, dispatch, and DBOS state in PostgreSQL through Alembic and DBOS-owned migrations.
+- Replace SQLite-dependent autoincrement, JSON, timestamp, locking, and sequence assumptions with PostgreSQL-correct behavior.
+- Add expiry indexes and a tested purge path for temporary content.
+
+Exit gate:
+
+- A clean local Compose environment migrates, starts, streams a model response, cancels it, restarts API/worker processes, and resumes/replays without losing ownership or duplicating paid work.
+- The complete production image set builds for ARM64 and runs its health checks.
+- PostgreSQL migration, concurrency, idempotency, and purge tests pass against a real PostgreSQL service.
+- Production configuration fails closed when a required secret, trusted origin, or non-SQLite database is missing.
+
+### Phase 3B: Allowlisted identity, quotas, and alpha administration
+
+Objective: make every generation attributable to an approved private-alpha account and keep use within explicit per-user and service budgets.
+
+Deliver:
+
+- Implement the allowlisted email/password registration, verification, login, password change/reset, and transactional-email flows defined in Section 7.8.
+- Add exact-email allowlisting, account activation/suspension/revocation, server-side roles, logout, per-session revocation, mandatory admin TOTP, and an initial admin bootstrap command.
+- Require authentication for run creation, run/event access, cancellation, editing, feedback, quota requests, and any share creation. Health, legal pages, registration, verification/reset, login, and access requests remain unauthenticated.
+- Replace anonymous run ownership with `user_id` plus the creating auth-session ID. Verify ownership on every snapshot, stream, cancellation, branch, and edit operation.
+- Implement the atomic 10-runs-per-UTC-day allowance, reservation/charge/release lifecycle, account overrides, one-off grants, remaining/reset API, and request-more workflow described in Section 7.9.
+- Add short-window backend limits for login, access requests, run creation, concurrent streams, and administrative mutations. Configure Turnstile for access requests and risk-triggered challenges.
+- Issue a first-party random device cookie and HMAC-pseudonymize trusted client IPs. Do not implement canvas/font/audio/GPU fingerprinting.
+- Build the login gate, account/allowance presentation, quota-exhausted state, access-request result, request-more form, and account-disabled state across every theme and viewport.
+- Build an admin-only interface for allowlist entries, pending access and quota requests, user status, sessions, grants, daily runs, token/cost totals, failures, queue/health status, and content-free audit events.
+- Disable the production Developer panel for ordinary accounts and ensure production logs/admin tables do not expose prompts or answers by default.
+- Update privacy, cookie, terms, provider-disclosure, and early-alpha accuracy copy before any tester is invited.
+
+Database work:
+
+- Add `access_allowlist`, `access_request`, `user_account`, `password_credential`, `email_action_token`, `auth_session`, `user_role`, `admin_mfa`, `user_device`, `daily_usage_ledger`, `quota_grant`, `quota_request`, and content-free `audit_event` records.
+- Add `user_id` ownership to existing run and active-message-control records and indexes for account status, session expiry, usage day, pending requests, and purge windows.
+- Store only digests for session/device/email-action/recovery tokens and rotating HMAC pseudonyms for IP signals. Store password verifiers, never passwords; encrypt admin TOTP secrets outside the database key domain. Do not store ordinary raw IP addresses.
+
+Exit gate:
+
+- An unapproved email cannot create an account or a run; an approved email can create exactly one local account; a suspended or revoked account loses run access immediately.
+- Cross-account run IDs, event streams, branches, edits, cancellations, and admin APIs remain inaccessible under direct crafted requests.
+- Ten concurrent create requests cannot exceed one account's allowance, and an idempotent retry consumes one unit.
+- Cancellation and provider-failure cases settle allowance exactly as documented.
+- Admin actions require the role server-side, create an audit record, and cannot reveal chat contents through the ordinary dashboard.
+- Registration, verification, reset, Argon2, login throttling, session, CSRF, admin TOTP, quota, privilege, and trusted-proxy tests pass.
+
+### Phase 3C: CI/CD and gated private-alpha launch
+
+Objective: deploy the authenticated Phase 3 build to `cephalonthesos.com` on the single OCI host with a repeatable release and recovery path.
+
+Deliver:
+
+- Amend and apply the OCI VM manifest for the confirmed domain, PostgreSQL data volume, Caddy, API, agent worker, migration/backup jobs, and Cloudflare proxy path.
+- Provision the VM, network rules, volume mount, deploy user, Docker runtime, log rotation, and required OCI monitoring through reviewed OpenTofu/Terraform and cloud-init where practical; document any one-time console operation.
+- Configure `cephalonthesos.com`, redirect `www.cephalonthesos.com`, Cloudflare proxying, strict origin TLS, Turnstile, security headers, and an origin firewall that does not trust arbitrary forwarding headers.
+- Configure a dedicated transactional-email subdomain with Resend verification, SPF, DKIM, and DMARC; exercise registration, verification, and password reset against production URLs before inviting users.
+- Publish immutable SHA-tagged ARM64 images to GHCR from GitHub Actions. The VM pulls images; no compiler, repository checkout, or self-hosted GitHub runner is required on production.
+- Keep the deployment gate compact but mandatory: dependency lock validation, frontend typecheck/build, API import/startup, focused auth/quota tests, and PostgreSQL migration from an empty database. Full browser, visual, and live-provider suites run separately rather than blocking every deployment.
+- On an approved main-branch deployment, serialize production jobs, verify the SSH host key, pull the exact image digest, take a pre-migration logical backup when schema changes, run the one-shot migration, update services, and check external login/static/API readiness.
+- Retain the previous application image set and automatically roll it back if post-deploy health checks fail. Database migrations use expand/contract sequencing and are never blindly downgraded by automation.
+- Configure nightly encrypted PostgreSQL backups to private Object Storage, backup-age monitoring, container/disk/API/provider alarms, and one documented restore drill.
+- Seed the admin email and initial allowlist out of band, then invite a deliberately small tester cohort. The site remains noindex for private chat/account/admin routes and clearly labels answers as ungrounded early-alpha output.
+- Establish an operations checklist for deployment, rollback, user suspension, quota grant, provider-budget exhaustion, key rotation, backup restore, and taking generation offline while leaving static status/legal pages available.
+
+CI/CD policy:
+
+- Pull requests run ordinary lint/type/unit checks without production secrets.
+- A push to `main` builds and publishes immutable images.
+- Production deployment uses a GitHub `production` environment and begins with manual approval during the private alpha. Only one deployment may run at a time.
+- Production secrets remain on the VM or in the protected deployment environment and are never baked into images, frontend bundles, logs, or workflow artifacts.
+- There is no second VM or permanent staging environment initially; local PostgreSQL/Compose is the pre-production integration environment.
+
+Exit gate:
+
+- `https://cephalonthesos.com` serves the pinned release with strict TLS and same-origin API access after a fresh VM rebuild.
+- Only allowlisted authenticated users can generate, each account receives the documented allowance, and the admin can approve access/extra usage and inspect content-free traffic/cost data.
+- A failed application rollout returns to the prior image set, and a clean PostgreSQL restore from Object Storage has been demonstrated.
+- Provider and global daily budgets can stop new generations without taking down login, account, legal, or admin status pages.
+- The first private-alpha week has an explicit user ceiling, provider-cost ceiling, and daily operator review.
 
 ### Phase 4: Corpus ingestion and candidate retrieval
 
@@ -1788,31 +2009,31 @@ Exit gate:
 - Completed external reads are not unnecessarily repeated after recovery.
 - Queueing research cannot materially degrade quick-answer latency.
 
-### Phase 9: Production hardening and private alpha
+### Phase 9: Intelligence-complete hardening and expanded private alpha
 
-Objective: prove the system can be operated safely on the target VM.
+Objective: requalify the hosted system after retrieval, tools, the bounded controller, and durable research materially increase its risk and resource use.
 
 Deliver:
 
 - Edge and backend rate limiting plus abuse challenge integration.
 - Full retention, purge, and privacy verification.
-- Admin operations interface.
+- Extend the Phase 3B admin interface for corpus, tools, research queues, and eval operations.
 - Provider quota alarms and hard daily budget controls.
 - Backups, restore drill, monitoring, alerts, and operational runbooks.
 - CSP, security headers, admin authentication, dependency review, and penetration checklist.
 - Load tests for cached, generic, grounded, agentic, and research paths.
-- Privacy, terms, about, provider disclosure, and unofficial-project copy.
+- Re-review privacy, terms, about, provider disclosure, unofficial-project copy, and account deletion/export procedures.
 - VM manifest amendments and final measured container limits.
 
 Database work:
 
-- Add only the operations, feedback, audit, and admin-support tables demonstrated as necessary during alpha preparation.
+- Add only the additional operations, feedback, audit, and admin-support tables demonstrated as necessary after the Phase 3B baseline.
 - Test production-like backup and restore with application and DBOS schemas together.
 
 Exit gate:
 
 - All VM commissioning and production-readiness gates pass.
-- One anonymous client cannot exhaust provider quotas or monopolize the worker.
+- One account, device, or network cannot exhaust provider quotas or monopolize the worker.
 - Restore, rollback, workflow recovery, and corpus rollback are demonstrated.
 
 ### Phase 10: Public beta and controlled expansion
@@ -1827,7 +2048,7 @@ Deliver:
 - Weekly eval expansion from opt-in, anonymized, manually recreated, or synthetic failure cases.
 - Model and prompt changes only through recorded evaluation comparisons.
 
-Do not add embeddings, unrestricted web research, accounts, side-effecting tools, or additional providers during the initial ramp unless an observed failure demonstrates the need and the appropriate earlier-phase quality gates are extended.
+Do not add embeddings, unrestricted web research, public self-service registration, side-effecting tools, or additional providers during the initial ramp unless an observed failure demonstrates the need and the appropriate earlier-phase quality gates are extended.
 
 ### 17.1 Progressive database map
 
@@ -1839,12 +2060,15 @@ The database evolves with the product rather than being designed in one speculat
 | 1 | No product schema; browser-local fixtures and state |
 | 2 | Anonymous sessions, runs, events, idempotency, dispatch outbox, retention |
 | 3 | Model calls, provider usage/budgets, basic workflow dispatch |
+| 3A | PostgreSQL production parity, completed dispatch/event ownership, purge, and production runtime configuration |
+| 3B | Allowlist, accounts, password credentials, email-action tokens, sessions, roles/admin MFA, device signals, quota ledger/grants/requests, and admin audit |
+| 3C | Production deployment state, backup records, release metadata, and operational health baselines |
 | 4 | Sources, documents, revisions, sections, chunks, entities, ingestion, index manifests |
 | 5 | Evidence, citations, final answers, retrieval/answer caches |
 | 6 | Plans, steps, tool calls, clarifications, controller transitions |
 | 7 | World state, mechanics versions, market cache, calculation records as needed |
 | 8 | DBOS workflow state, recovery metadata, workflow retention |
-| 9-10 | Operational, feedback, audit, and measured product additions only |
+| 9-10 | Intelligence-era operational, feedback, audit, and measured product additions only |
 
 Every phase includes a forward migration, clean-database test, representative data fixture, index review, and backup/restore impact assessment. Database design remains progressive, but schema ownership and migration discipline begin in Phase 0.
 
@@ -1903,7 +2127,9 @@ Every phase includes a forward migration, clean-database test, representative da
 - Embedding-based retrieval without evaluation evidence.
 - A neural reranker by default.
 - Local generative model hosting.
-- User accounts and cloud chat history.
+- Unrestricted public registration, federated social login/account linking, or paid account tiers during the private alpha.
+- Cloud-synchronized chat history; authentication does not move browser-local conversations into the account automatically.
+- Invasive canvas, font, audio, GPU, behavioural, or cross-site device fingerprinting.
 - Automated trading, seller messaging, or account-authenticated market actions.
 - Arbitrary code execution or user-supplied plugins.
 - Redis, Celery, Elasticsearch, Kubernetes, or a separate vector database.
@@ -1915,16 +2141,27 @@ Every phase includes a forward migration, clean-database test, representative da
 1. Select the initial OpenRouter models for each role through tool-use, structured-output, latency, privacy, and cost evaluation.
 2. Validate DBOS and Pydantic AI event streaming together under worker restart and deployment.
 3. Benchmark BM25S memory-mapped indexes on ARM64 with the estimated corpus.
-4. Define the first authoritative and community corpus sources and their legal/crawl policies.
+4. Confirm the Warframe Wiki permission, export route, attribution terms, and synchronization limits, then define the remaining authoritative/community source policies.
 5. Specify Warframe entity ontology and alias governance.
-6. Establish exact anonymous content-retention and share-expiry periods in privacy copy.
+6. Establish exact account, authentication, security-signal, temporary-content, and share-expiry periods in privacy copy.
 7. Define build-calculation scope for the first supported weapon and damage modes.
 8. Confirm Warframe.market API policies, caching, and endpoint rate limits before public tooling.
 9. Set measured quick, standard, and research budgets from provider quotas and alpha traces.
 10. Choose the OpenTelemetry backend or local retention strategy without compromising privacy or free-tier goals.
+11. Confirm the initial admin email, tester allowlist, Resend account/sending subdomain, Cloudflare zone, OCI home region, and production GitHub environment before Phase 3C commissioning.
+12. Set the private-alpha maximum active accounts, global daily run ceiling, per-IP/device anomaly thresholds, and OpenRouter hard-spend response from measured local/provider data.
 
 ## 21. Framework References
 
+- NIST password-authenticator requirements: <https://pages.nist.gov/800-63-4/sp800-63b/authenticators/>
+- OWASP password storage and Argon2id guidance: <https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html>
+- OWASP email validation and verification guidance: <https://cheatsheetseries.owasp.org/cheatsheets/Email_Validation_and_Verification_Cheat_Sheet.html>
+- Resend transactional-email quotas and limits: <https://resend.com/docs/knowledge-base/account-quotas-and-limits>
+- OWASP authentication, session, and CSRF guidance: <https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html>
+- Cloudflare Turnstile server-side validation: <https://developers.cloudflare.com/turnstile/get-started/server-side-validation/>
+- ICO storage/access technology guidance, including device fingerprinting: <https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/guidance-on-the-use-of-storage-and-access-technologies/>
+- GitHub Actions deployment environments and concurrency: <https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments>
+- OCI Always Free resource limits: <https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm>
 - Pydantic AI agents and event streaming: <https://pydantic.dev/docs/ai/core-concepts/agent/>
 - Pydantic AI tools and toolsets: <https://pydantic.dev/docs/ai/tools-toolsets/tools/>
 - Pydantic AI multi-agent patterns: <https://pydantic.dev/docs/ai/guides/multi-agent-applications/>

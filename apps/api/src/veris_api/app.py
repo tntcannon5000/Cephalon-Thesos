@@ -15,6 +15,7 @@ from sqlalchemy import text
 from starlette.middleware.base import RequestResponseEndpoint
 
 from veris_api.config import get_settings
+from veris_api.db.dispatch import worker_is_live
 from veris_api.db.repository import (
     ConversationTerminatedError,
     MessageNotFoundError,
@@ -22,11 +23,10 @@ from veris_api.db.repository import (
     edit_message,
     events_after,
     get_run_for_session,
-    mark_run_cancelled,
+    request_run_cancellation,
 )
 from veris_api.db.session import dispose_engine, get_engine
 from veris_api.developer_logs import configure_developer_logging, get_developer_log_buffer
-from veris_api.runtime import cancel_run, submit_run
 from veris_api.schemas import (
     CreateRunRequest,
     CreateRunResponse,
@@ -57,7 +57,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
         docs_url="/api/docs" if settings.environment == "development" else None,
-        openapi_url="/api/openapi.json",
+        openapi_url="/api/openapi.json" if settings.environment == "development" else None,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -94,6 +94,15 @@ def create_app() -> FastAPI:
     async def ready() -> dict[str, str]:
         async with get_engine().connect() as connection:
             await connection.execute(text("SELECT 1"))
+        return {"status": "ready"}
+
+    @app.get("/api/v1/health/worker")
+    async def worker_health() -> dict[str, str]:
+        if not await worker_is_live():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "worker_unavailable"},
+            )
         return {"status": "ready"}
 
     @app.get("/api/v1/suggestions")
@@ -141,10 +150,7 @@ def create_app() -> FastAPI:
                         idle_ticks = 0
                         for entry in pending:
                             sequence = entry.sequence
-                            yield (
-                                f"id: {entry.sequence}\n"
-                                f"data: {json.dumps(entry.as_dict())}\n\n"
-                            )
+                            yield (f"id: {entry.sequence}\ndata: {json.dumps(entry.as_dict())}\n\n")
                     else:
                         idle_ticks += 1
                         if idle_ticks % 20 == 0:
@@ -184,17 +190,16 @@ def create_app() -> FastAPI:
                 SESSION_COOKIE,
                 session_id,
                 httponly=True,
-                secure=False,
+                secure=settings.session_cookie_secure,
                 samesite="lax",
                 max_age=60 * 60 * 24 * 30,
             )
         if created.created:
             logger.info(
-                "Accepted run %s for conversation %s",
+                "Queued run %s for conversation %s",
                 created.run_id,
                 body.conversation_id,
             )
-            await submit_run(created.run_id)
         return CreateRunResponse(
             run_id=created.run_id,
             event_url=f"/api/v1/runs/{created.run_id}/events",
@@ -270,8 +275,7 @@ def create_app() -> FastAPI:
     ) -> Response:
         if veris_session is None or await get_run_for_session(run_id, veris_session) is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        await cancel_run(run_id)
-        await mark_run_cancelled(run_id)
+        await request_run_cancellation(run_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.patch(

@@ -3,21 +3,27 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
+from time import perf_counter
+from typing import Any
 
 from dbos import DBOS
 from pydantic_ai import Agent, ModelRetry
 from pydantic_ai.durable_exec.dbos import DBOSDurability
+from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.usage import UsageLimits
 
 from veris_api.agent_events import persist_agent_events
 from veris_api.config import get_settings
+from veris_api.db.provider_usage import record_provider_attempts
 from veris_api.db.repository import (
     add_event,
+    finalize_run,
     format_history,
     get_run,
-    set_message_safety,
+    mark_run_cancelled,
     set_run_status,
 )
 from veris_api.prompts import ARCHIVES_UNAVAILABLE_COPY, OPERATIONAL_PROMPT
@@ -70,7 +76,9 @@ async def mark_working(
     run = await get_run(run_id)
     if run is None:
         raise RuntimeError("Run not found")
-    await set_run_status(run_id, "working")
+    if not await set_run_status(run_id, "working"):
+        await mark_run_cancelled(run_id)
+        raise asyncio.CancelledError
     await add_event(
         run_id,
         "status.changed",
@@ -94,52 +102,139 @@ async def persist_turn_result(run_id: str, message_id: str, result: TurnResult) 
         result.action,
         extra={"developer_layer": "ai"},
     )
-    await set_message_safety(message_id, result.action)
-
     if result.action == "terminate_conversation":
-        await set_run_status(run_id, "terminated")
-        await add_event(run_id, "conversation.terminated", {"terminated": True})
+        await finalize_run(
+            run_id,
+            "terminated",
+            [("conversation.terminated", {"terminated": True})],
+            message_id=message_id,
+            safety_action=result.action,
+        )
         return
 
     if result.action == "archive_unavailable":
-        await set_run_status(run_id, "completed", answer=ARCHIVES_UNAVAILABLE_COPY)
-        await add_event(
-            run_id,
-            "response.archive_unavailable",
-            {"text": ARCHIVES_UNAVAILABLE_COPY},
-        )
+        events: list[tuple[str, dict[str, Any]]] = [
+            ("response.archive_unavailable", {"text": ARCHIVES_UNAVAILABLE_COPY})
+        ]
         if result.conversation_title:
-            await add_event(
-                run_id,
-                "conversation.titled",
-                {"title": result.conversation_title},
-            )
-        await add_event(run_id, "run.completed", {"status": "completed"})
+            events.append(("conversation.titled", {"title": result.conversation_title}))
+        events.append(("run.completed", {"status": "completed"}))
+        await finalize_run(
+            run_id,
+            "completed",
+            events,
+            message_id=message_id,
+            safety_action=result.action,
+            answer=ARCHIVES_UNAVAILABLE_COPY,
+        )
         return
 
     answer = result.answer or ""
-    await set_run_status(run_id, "completed", answer=answer)
+    events = []
     if result.conversation_title:
-        await add_event(
-            run_id,
-            "conversation.titled",
-            {"title": result.conversation_title},
-        )
-    await add_event(run_id, "run.completed", {"status": "completed"})
+        events.append(("conversation.titled", {"title": result.conversation_title}))
+    events.append(("run.completed", {"status": "completed"}))
+    await finalize_run(
+        run_id,
+        "completed",
+        events,
+        message_id=message_id,
+        safety_action=result.action,
+        answer=answer,
+    )
 
 
 @DBOS.step(retries_allowed=False)
 async def persist_failure(run_id: str, error_code: str) -> None:
-    await set_run_status(run_id, "failed", error_code=error_code)
-    await add_event(
+    await finalize_run(
         run_id,
-        "run.failed",
-        {
-            "code": error_code,
-            "message": "The Archives could not be reached. Your message has been kept for retry.",
-        },
+        "failed",
+        [
+            (
+                "run.failed",
+                {
+                    "code": error_code,
+                    "message": (
+                        "The Archives could not be reached. Your message has been kept for retry."
+                    ),
+                },
+            )
+        ],
+        error_code=error_code,
     )
     logger.error("Run %s persisted failure code=%s", run_id, error_code)
+
+
+@DBOS.step(retries_allowed=False)
+async def persist_provider_attempt_records(
+    run_id: str,
+    attempts: list[dict[str, Any]],
+) -> None:
+    await record_provider_attempts(run_id, attempts)
+
+
+def _successful_attempts(
+    result_messages: list[object],
+    *,
+    started_at: datetime,
+    completed_at: datetime,
+    latency_ms: int,
+) -> list[dict[str, Any]]:
+    responses = [message for message in result_messages if isinstance(message, ModelResponse)]
+    attempts: list[dict[str, Any]] = []
+    for index, response in enumerate(responses):
+        usage = response.usage
+        attempts.append(
+            {
+                "provider": response.provider_name or "openrouter",
+                "requested_model": settings.openrouter_model,
+                "resolved_model": response.model_name,
+                "status": "succeeded" if index == len(responses) - 1 else "retried",
+                "request_tokens": usage.input_tokens,
+                "response_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+                "estimated_cost_usd": str(usage.cost) if usage.cost is not None else None,
+                "latency_ms": latency_ms if index == len(responses) - 1 else None,
+                "provider_request_id": response.provider_response_id,
+                "metadata_json": {
+                    "finish_reason": response.finish_reason,
+                    "provider_url": response.provider_url,
+                    "usage_details": usage.details,
+                    "route": [
+                        settings.openrouter_model,
+                        *settings.openrouter_fallback_models,
+                    ],
+                },
+                "started_at": started_at,
+                "completed_at": completed_at,
+            }
+        )
+    return attempts
+
+
+def _terminal_attempt(
+    status: str,
+    *,
+    started_at: datetime,
+    completed_at: datetime,
+    latency_ms: int,
+    error_code: str | None = None,
+    cancellation_point: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "provider": "openrouter",
+        "requested_model": settings.openrouter_model,
+        "resolved_model": None,
+        "status": status,
+        "latency_ms": latency_ms,
+        "error_code": error_code,
+        "cancellation_point": cancellation_point,
+        "metadata_json": {
+            "route": [settings.openrouter_model, *settings.openrouter_fallback_models]
+        },
+        "started_at": started_at,
+        "completed_at": completed_at,
+    }
 
 
 @DBOS.workflow()
@@ -155,6 +250,8 @@ async def run_agent_workflow(run_id: str) -> None:
         "Current user request:\n"
         f"{request_text}"
     )
+    started_at = datetime.now(UTC)
+    started_clock = perf_counter()
     try:
         logger.info(
             "Dispatching run %s to model_route=%s request_chars=%s history_messages=%s",
@@ -178,8 +275,41 @@ async def run_agent_workflow(run_id: str) -> None:
             result.usage,
             extra={"developer_layer": "ai"},
         )
+        completed_at = datetime.now(UTC)
+        latency_ms = round((perf_counter() - started_clock) * 1000)
+        attempts = _successful_attempts(
+            list(result.new_messages()),
+            started_at=started_at,
+            completed_at=completed_at,
+            latency_ms=latency_ms,
+        )
+        if not attempts:
+            attempts = [
+                _terminal_attempt(
+                    "succeeded",
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    latency_ms=latency_ms,
+                )
+            ]
+        await persist_provider_attempt_records(run_id, attempts)
         await persist_turn_result(run_id, message_id, result.output)
     except asyncio.CancelledError:
+        completed_at = datetime.now(UTC)
+        await asyncio.shield(
+            persist_provider_attempt_records(
+                run_id,
+                [
+                    _terminal_attempt(
+                        "cancelled",
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        latency_ms=round((perf_counter() - started_clock) * 1000),
+                        cancellation_point="provider_stream",
+                    )
+                ],
+            )
+        )
         logger.info(
             "Provider execution cancelled for run %s",
             run_id,
@@ -187,6 +317,19 @@ async def run_agent_workflow(run_id: str) -> None:
         )
         raise
     except Exception:
+        completed_at = datetime.now(UTC)
+        await persist_provider_attempt_records(
+            run_id,
+            [
+                _terminal_attempt(
+                    "failed",
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    latency_ms=round((perf_counter() - started_clock) * 1000),
+                    error_code="provider_unavailable",
+                )
+            ],
+        )
         logger.exception(
             "Model execution failed for run %s",
             run_id,

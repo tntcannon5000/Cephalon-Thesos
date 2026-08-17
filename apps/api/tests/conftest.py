@@ -1,0 +1,3 @@
+from veris_api.event_loop import configure_platform_event_loop
+
+configure_platform_event_loop()

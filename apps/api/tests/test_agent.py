@@ -32,18 +32,19 @@ def test_restricted_action_does_not_require_answer_text() -> None:
 async def test_title_event_precedes_completed_event(monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[tuple[str, dict[str, object]]] = []
 
-    async def record_event(
-        run_id: str, event_type: str, payload: dict[str, object]
-    ) -> None:
+    async def record_finalization(
+        run_id: str,
+        status: str,
+        terminal_events: list[tuple[str, dict[str, object]]],
+        **kwargs: object,
+    ) -> bool:
         assert run_id == "run-1"
-        events.append((event_type, payload))
+        assert status == "completed"
+        assert kwargs["answer"] == "Void Relics contain Prime rewards."
+        events.extend(terminal_events)
+        return True
 
-    async def ignore_call(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-
-    monkeypatch.setattr(agent_module, "add_event", record_event)
-    monkeypatch.setattr(agent_module, "set_message_safety", ignore_call)
-    monkeypatch.setattr(agent_module, "set_run_status", ignore_call)
+    monkeypatch.setattr(agent_module, "finalize_run", record_finalization)
 
     persist_turn_result = inspect.unwrap(agent_module.persist_turn_result)
     await persist_turn_result(

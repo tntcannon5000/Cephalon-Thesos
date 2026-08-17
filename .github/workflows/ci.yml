@@ -24,6 +24,25 @@ jobs:
 
   api:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_DB: thesos_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d thesos_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      THESOS_ENV: test
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/thesos_test
+      DBOS_SYSTEM_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/thesos_test
+      THESOS_INTEGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/thesos_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -33,4 +52,25 @@ jobs:
       - run: uv sync --project apps/api --frozen
       - run: uv run --project apps/api ruff check apps/api
       - run: uv run --project apps/api pyright apps/api/src
+      - run: uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
       - run: uv run --project apps/api pytest apps/api/tests
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - run: docker buildx bake -f infra/docker-bake.hcl --set '*.platform=linux/arm64'
+      - name: Validate production Compose
+        env:
+          POSTGRES_PASSWORD: compose-validation-only
+          DATABASE_URL: postgresql+psycopg://thesos:compose-validation-only@postgres:5432/thesos
+          DBOS_SYSTEM_DATABASE_URL: postgresql://thesos:compose-validation-only@postgres:5432/thesos
+          OPENROUTER_API_KEY: compose-validation-only
+          OPENROUTER_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
+          OPENROUTER_FALLBACK_MODELS: '["openai/gpt-oss-120b:free"]'
+          THESOS_API_IMAGE: thesos-api:test
+          THESOS_WEB_IMAGE: thesos-web:test
+          THESOS_BACKUP_IMAGE: thesos-backup:test
+        run: docker compose -f infra/compose.production.yaml config --quiet

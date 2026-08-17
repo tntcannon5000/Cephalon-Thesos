@@ -1,0 +1,173 @@
+x-json-logging: &json-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-runtime-environment: &runtime-environment
+  THESOS_ENV: production
+  THESOS_LOG_LEVEL: INFO
+  THESOS_WEB_ORIGIN: https://cephalonthesos.com
+  DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL}"
+  DBOS_SYSTEM_DATABASE_URL: "${DBOS_SYSTEM_DATABASE_URL:?Set DBOS_SYSTEM_DATABASE_URL}"
+  SESSION_COOKIE_SECURE: "true"
+  DATABASE_POOL_SIZE: "4"
+  DATABASE_MAX_OVERFLOW: "2"
+  DBOS_DATABASE_POOL_SIZE: "5"
+  RUN_RETENTION_DAYS: ${RUN_RETENTION_DAYS:-30}
+  OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}"
+  OPENROUTER_MODEL: "${OPENROUTER_MODEL:?Set OPENROUTER_MODEL}"
+  OPENROUTER_FALLBACK_MODELS: '${OPENROUTER_FALLBACK_MODELS:?Set OPENROUTER_FALLBACK_MODELS}'
+  OPENROUTER_ALLOW_PAID_MODELS: ${OPENROUTER_ALLOW_PAID_MODELS:-false}
+  OPENROUTER_APP_URL: https://cephalonthesos.com
+  OPENROUTER_APP_TITLE: Thesos Private Alpha
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: thesos
+      POSTGRES_USER: thesos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thesos -d thesos"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    shm_size: 256mb
+    mem_limit: 1536m
+    cpus: 1.0
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+  migrate:
+    image: ${THESOS_API_IMAGE:?Set THESOS_API_IMAGE}
+    command: ["alembic", "-c", "apps/api/alembic.ini", "upgrade", "head"]
+    environment: *runtime-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    mem_limit: 512m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+  api:
+    image: ${THESOS_API_IMAGE:?Set THESOS_API_IMAGE}
+    restart: unless-stopped
+    environment:
+      <<: *runtime-environment
+      THESOS_API_HOST: 0.0.0.0
+      THESOS_API_PORT: "8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    mem_limit: 768m
+    cpus: 0.75
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+  worker:
+    image: ${THESOS_API_IMAGE:?Set THESOS_API_IMAGE}
+    command: ["python", "-m", "veris_api.worker"]
+    restart: unless-stopped
+    environment:
+      <<: *runtime-environment
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-60}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "veris_api.worker_health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    mem_limit: 1536m
+    cpus: 1.25
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+  web:
+    image: ${THESOS_WEB_IMAGE:?Set THESOS_WEB_IMAGE}
+    restart: unless-stopped
+    environment:
+      THESOS_SITE_ADDRESS: ${THESOS_SITE_ADDRESS:-https://cephalonthesos.com}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+    mem_limit: 256m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+  backup:
+    image: ${THESOS_BACKUP_IMAGE:?Set THESOS_BACKUP_IMAGE}
+    profiles: ["operations"]
+    environment:
+      DATABASE_URL: ${DBOS_SYSTEM_DATABASE_URL:?Set DBOS_SYSTEM_DATABASE_URL}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - postgres-backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    mem_limit: 512m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+volumes:
+  postgres-data:
+  postgres-backups:
+  caddy-data:
+  caddy-config:

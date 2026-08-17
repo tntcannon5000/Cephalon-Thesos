@@ -16,7 +16,15 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
-        _engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+        settings = get_settings()
+        engine_options: dict[str, object] = {"pool_pre_ping": True}
+        if settings.database_url.startswith("postgresql"):
+            engine_options.update(
+                pool_size=settings.database_pool_size,
+                max_overflow=settings.database_max_overflow,
+                pool_recycle=1800,
+            )
+        _engine = create_async_engine(settings.database_url, **engine_options)
     return _engine
 
 
