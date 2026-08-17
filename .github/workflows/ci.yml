@@ -82,7 +82,10 @@ jobs:
           THESOS_API_IMAGE: thesos-api:test
           THESOS_WEB_IMAGE: thesos-web:test
           THESOS_BACKUP_IMAGE: thesos-backup:test
-        run: docker compose -f infra/compose.production.yaml config --quiet
+        run: |
+          docker compose -f infra/compose.production.yaml config --quiet
+          docker compose -f infra/compose.production.yaml config --format json \
+            | python -c 'import json,sys; data=json.load(sys.stdin); mounts=data["services"]["postgres"]["volumes"]; assert any(item["target"] == "/var/lib/postgresql" for item in mounts)'
 
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
