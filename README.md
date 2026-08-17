@@ -29,5 +29,7 @@ scripts        Local development and verification entry points
 The hosted runtime contract and recovery checks are documented in
 `docs/runbooks/PHASE_3A_OPERATIONS.md`. Private-alpha identity, access bootstrap, quotas, and
 administration are documented in `docs/runbooks/PHASE_3B_PRIVATE_ALPHA.md`.
+Production deployment, backup, restore, and incident procedures are documented in
+`docs/runbooks/PHASE_3C_PRODUCTION.md`.
 
 This is an unofficial fan project and is not affiliated with Digital Extremes.

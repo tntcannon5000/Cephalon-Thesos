@@ -7,7 +7,7 @@ Related documents: `scribbledoc.md`, `THESOS_VM_MANIFEST.md`, `THESOS_PROMPTING_
 
 This document defines how Thesos should be built. It is deliberately more specific than a product brief: it establishes component boundaries, data contracts, control flow, safety limits, testing expectations, and release gates.
 
-The current delivery order inserts Phases 3A-3C between the generic LLM loop and corpus work. These phases move the existing prototype onto PostgreSQL, add allowlisted authentication and enforceable usage limits, and deploy a deliberately small private alpha at `cephalonthesos.com`. This does not declare the ungrounded Phase 3 model intelligent or production-ready; the hosted alpha remains visibly labelled as an early, non-source-backed evaluation build while permission and corpus work are pending.
+The current delivery order inserts Phases 3A-3C between the generic LLM loop and corpus work. These phases move the existing prototype onto PostgreSQL, add allowlisted authentication and enforceable usage limits, and deploy a deliberately small private alpha at `chat.cephalonthesos.com`. This does not declare the ungrounded Phase 3 model intelligent or production-ready; the hosted alpha remains visibly labelled as an early, non-source-backed evaluation build while permission and corpus work are pending.
 
 Where this document conflicts with the current VM manifest, this document represents the newer application decision. The manifest should be amended before deployment.
 
@@ -1625,7 +1625,7 @@ The VM manifest should be updated before implementation deployment:
 4. Replace the initial local embedding-model directory with a general `/srv/veris/indexes` directory; embeddings remain optional.
 5. Make pgvector extension and vector indexes optional rather than launch requirements.
 6. Budget memory for the agent worker and memory-mapped BM25 index.
-7. Set the initial public origin to `cephalonthesos.com`, with `www` redirected and API traffic remaining same-origin under `/api`.
+7. Set the initial public origin to `chat.cephalonthesos.com`, with the apex and `www` redirected and API traffic remaining same-origin under `/api`.
 8. Add the transactional-email, password-hashing, admin-TOTP, Turnstile, session/CSRF/HMAC, GHCR, deploy-user, backup, and trusted-Cloudflare configuration introduced by Phases 3A-3C.
 9. Make PostgreSQL, the API, the agent worker, and Caddy continuously running; migrations, backups, and future ingestion remain one-shot jobs.
 10. Commission the hosted private alpha before corpus services exist, then add ingestion/index storage without replacing the authentication, quota, or deployment substrate.
@@ -1803,6 +1803,12 @@ Exit gate:
 
 ### Phase 3B: Allowlisted identity, quotas, and alpha administration
 
+Implementation checkpoint (2026-08-17): implemented locally and under release verification.
+The repository now contains exact-email registration, verification and reset delivery, Argon2id
+credentials, opaque server sessions with CSRF, administrator TOTP and recovery codes, account and
+signal quotas, PostgreSQL conversation/preferences persistence, content-free audit records, and
+the private-alpha administration interface. Production deployment remains Phase 3C work.
+
 Objective: make every generation attributable to an approved private-alpha account and keep use within explicit per-user and service budgets.
 
 Deliver:
@@ -1836,13 +1842,13 @@ Exit gate:
 
 ### Phase 3C: CI/CD and gated private-alpha launch
 
-Objective: deploy the authenticated Phase 3 build to `cephalonthesos.com` on the single OCI host with a repeatable release and recovery path.
+Objective: deploy the authenticated Phase 3 build to `chat.cephalonthesos.com` on the single OCI host with a repeatable release and recovery path.
 
 Deliver:
 
 - Amend and apply the OCI VM manifest for the confirmed domain, PostgreSQL data volume, Caddy, API, agent worker, migration/backup jobs, and Cloudflare proxy path.
 - Provision the VM, network rules, volume mount, deploy user, Docker runtime, log rotation, and required OCI monitoring through reviewed OpenTofu/Terraform and cloud-init where practical; document any one-time console operation.
-- Configure `cephalonthesos.com`, redirect `www.cephalonthesos.com`, Cloudflare proxying, strict origin TLS, Turnstile, security headers, and an origin firewall that does not trust arbitrary forwarding headers.
+- Configure `chat.cephalonthesos.com`, redirect the apex and `www.cephalonthesos.com`, Cloudflare proxying, strict origin TLS, Turnstile, security headers, and an origin firewall that does not trust arbitrary forwarding headers.
 - Configure a dedicated transactional-email subdomain with Resend verification, SPF, DKIM, and DMARC; exercise registration, verification, and password reset against production URLs before inviting users.
 - Publish immutable SHA-tagged ARM64 images to GHCR from GitHub Actions. The VM pulls images; no compiler, repository checkout, or self-hosted GitHub runner is required on production.
 - Keep the deployment gate compact but mandatory: dependency lock validation, frontend typecheck/build, API import/startup, focused auth/quota tests, and PostgreSQL migration from an empty database. Full browser, visual, and live-provider suites run separately rather than blocking every deployment.
@@ -1862,7 +1868,7 @@ CI/CD policy:
 
 Exit gate:
 
-- `https://cephalonthesos.com` serves the pinned release with strict TLS and same-origin API access after a fresh VM rebuild.
+- `https://chat.cephalonthesos.com` serves the pinned release with strict TLS and same-origin API access after a fresh VM rebuild.
 - Only allowlisted authenticated users can generate, each account receives the documented allowance, and the admin can approve access/extra usage and inspect content-free traffic/cost data.
 - A failed application rollout returns to the prior image set, and a clean PostgreSQL restore from Object Storage has been demonstrated.
 - Provider and global daily budgets can stop new generations without taking down login, account, legal, or admin status pages.

@@ -1,8 +1,8 @@
 # Thesos: OCI VM Manifest
 
-Status: proposed production baseline  
+Status: commissioning baseline
 Cost target: OCI Always Free limits only  
-Architecture: one VM, one attached data volume, one Object Storage bucket
+Architecture: one VM boot volume and one Object Storage bucket
 
 This document describes the intended first production host for Thesos. It is a deployment contract, not yet an applied Terraform configuration. Values marked `TBD` must be selected when the OCI tenancy and domain are ready.
 
@@ -26,9 +26,9 @@ Cloudflare DNS, proxy, cache, and Turnstile
           +---------+----------+
           |                    |
           v                    v
-  attached block volume   OCI Object Storage
-  PostgreSQL + state      encrypted backups and
-                          compressed source snapshots
+  50 GB boot volume       OCI Object Storage
+  /srv/thesos data        encrypted backups and
+  and application state   compressed source snapshots
 ```
 
 The named application components are containers on the same Linux host. They are not separate VMs or separately allocated compute instances.
@@ -45,8 +45,6 @@ The named application components are containers on the same Linux host. They are
 | Network security group | 1 | Rules defined below | VM firewall boundary |
 | Ampere A1 VM | 1 | 2 OCPU, 12 GB RAM, ARM64 | All live application compute |
 | Boot volume | 1 | 50 GB | Ubuntu, Docker, images, logs |
-| Block volume | 1 | 100 GB | PostgreSQL and durable app data |
-| Reserved block allowance | 50 GB | Leave unallocated | Recovery and growth headroom |
 | Public IPv4 | 1 | Reserved if Always Free eligibility is confirmed | Stable DNS target |
 | Object Storage bucket | 1 | Private, versioning off initially | Dumps and source snapshots |
 | Block-volume backups | Up to 2 retained | Rotating data-volume backups | Rapid volume recovery |
@@ -69,7 +67,6 @@ region: TBD_HOME_REGION
 availability_domain: TBD
 image: Ubuntu 24.04 LTS ARM64
 boot_volume_gb: 50
-data_volume_gb: 100
 public_ip: true
 ```
 
@@ -91,17 +88,20 @@ Do not install Node.js, PostgreSQL, Python application dependencies, or build to
 | User | Purpose |
 |---|---|
 | `ubuntu` | Initial OCI administration only |
-| `veris-deploy` | Non-root deployment and service maintenance |
+| `thesos-deploy` | Non-root deployment and service maintenance |
 | `root` | System operations; direct SSH login disabled |
 
 Password SSH authentication and direct root SSH login must be disabled. Administrative access should use SSH keys and either an IP allowlist or OCI Bastion.
 
 ## 4. Disk Layout
 
-Mount the 100 GB attached volume by filesystem UUID, not device name.
+The private alpha uses the 50 GB boot filesystem because a separate block volume
+would add cost. Do not repartition or shrink the live root filesystem. A startup
+guard verifies the storage marker, expected filesystem, non-symlink paths, and at
+least 10 GiB of free space before Docker starts.
 
 ```text
-/srv/veris/
+/srv/thesos/
 |-- postgres/            PostgreSQL data directory
 |-- app-state/           Durable non-database application state
 |-- corpus-staging/      Temporary ingestion workspace
@@ -119,10 +119,8 @@ Boot volume
 - Docker engine and image layers
 - static frontend files inside the Caddy image
 - bounded system and container logs
-
-Attached volume
 - PostgreSQL data
-- local embedding model
+- local indexes and future optional models
 - ingestion workspace
 - short-lived backup staging
 
@@ -132,11 +130,13 @@ Object Storage
 - ingestion manifests needed to reproduce a corpus revision
 ```
 
-Keep at least 20% free space on both mounted volumes. Temporary ingestion files must be deleted after a successful corpus publication.
+Keep at least 10 GiB free on the boot filesystem. Temporary ingestion files must
+be deleted after a successful corpus publication. Local backup staging is not a
+disaster-recovery copy; encrypted backups must leave the VM for Object Storage.
 
 ## 5. Runtime Services
 
-Use one `compose.yaml` project named `veris`.
+Use one `compose.yaml` project named `thesos`.
 
 ### Continuously running
 
@@ -181,10 +181,10 @@ If the embedding model's per-worker memory is material, change to one API worker
 engine: PostgreSQL
 major_version: 17
 image: pinned ARM64 image containing pgvector
-database: veris
-application_role: veris_app
-migration_role: veris_migrate
-backup_role: veris_backup
+database: thesos
+application_role: thesos_app
+migration_role: thesos_migrate
+backup_role: thesos_backup
 public_listener: false
 ```
 
@@ -422,7 +422,7 @@ Normal deployment sequence:
 
 The service is not ready for public traffic until all of these pass:
 
-- VM and attached volume can be recreated from infrastructure code.
+- VM and guarded `/srv/thesos` storage layout can be recreated from infrastructure code.
 - PostgreSQL refuses public network access.
 - A logical dump restores successfully into an empty database.
 - Rebooting the VM automatically mounts the data volume and restores services.

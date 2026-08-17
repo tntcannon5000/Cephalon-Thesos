@@ -29,6 +29,7 @@ export function TurnstileWidget({ siteKey, onToken }: TurnstileWidgetProps) {
       if (cancelled || !container.current || !window.turnstile || widgetId) return;
       widgetId = window.turnstile.render(container.current, {
         sitekey: siteKey,
+        action: "access-request",
         theme: "auto",
         size: "flexible",
         callback: (token: string) => onToken(token),

@@ -8,11 +8,11 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           version: 11.19.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
           cache: pnpm
@@ -44,9 +44,9 @@ jobs:
       DBOS_SYSTEM_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/thesos_test
       THESOS_INTEGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/thesos_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
       - run: uv sync --project apps/api --frozen
@@ -54,13 +54,14 @@ jobs:
       - run: uv run --project apps/api pyright apps/api/src
       - run: uv run --project apps/api alembic -c apps/api/alembic.ini upgrade head
       - run: uv run --project apps/api pytest apps/api/tests
+      - run: python -m unittest discover -s infra/tests
 
   containers:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
       - run: docker buildx bake -f infra/docker-bake.hcl --set '*.platform=linux/arm64'
       - name: Validate production Compose
         env:
@@ -76,8 +77,87 @@ jobs:
           TURNSTILE_SECRET_KEY: compose-validation-only
           OPENROUTER_API_KEY: compose-validation-only
           OPENROUTER_MODEL: nvidia/nemotron-3-ultra-550b-a55b:free
-          OPENROUTER_FALLBACK_MODELS: '["openai/gpt-oss-120b:free"]'
+          OPENROUTER_FALLBACK_MODELS: '["nvidia/nemotron-3-super-120b-a12b:free","google/gemma-4-26b-a4b-it:free"]'
+          BACKUP_AGE_RECIPIENT: age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqd3h9d
           THESOS_API_IMAGE: thesos-api:test
           THESOS_WEB_IMAGE: thesos-web:test
           THESOS_BACKUP_IMAGE: thesos-backup:test
         run: docker compose -f infra/compose.production.yaml config --quiet
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [web, api, containers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+      - uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4
+        with:
+          files: infra/docker-bake.hcl
+          push: true
+          set: |
+            *.platform=linux/arm64
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: thesos-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Prepare pinned SSH trust
+        env:
+          DEPLOY_KEY: ${{ secrets.THESOS_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.THESOS_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/thesos-deploy
+          chmod 0600 ~/.ssh/thesos-deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0600 ~/.ssh/known_hosts
+      - name: Stage release manifest
+        env:
+          DEPLOY_HOST: ${{ secrets.THESOS_DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/thesos-deploy thesos-deploy@"$DEPLOY_HOST" \
+            "install -d -m 0770 /opt/thesos/releases/${GITHUB_SHA}"
+          scp -i ~/.ssh/thesos-deploy infra/compose.production.yaml \
+            thesos-deploy@"$DEPLOY_HOST":"/opt/thesos/releases/${GITHUB_SHA}/compose.production.yaml"
+      - name: Authenticate host to GHCR
+        env:
+          DEPLOY_HOST: ${{ secrets.THESOS_DEPLOY_HOST }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/thesos-deploy \
+            thesos-deploy@"$DEPLOY_HOST" \
+            "docker login ghcr.io --username '${GITHUB_ACTOR}' --password-stdin"
+      - name: Pull and activate immutable release
+        env:
+          DEPLOY_HOST: ${{ secrets.THESOS_DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/thesos-deploy thesos-deploy@"$DEPLOY_HOST" \
+            "/usr/local/sbin/thesos-deploy-release '${GITHUB_SHA}'"
+      - name: Remove host registry credential
+        if: always()
+        env:
+          DEPLOY_HOST: ${{ secrets.THESOS_DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/thesos-deploy thesos-deploy@"$DEPLOY_HOST" \
+            "docker logout ghcr.io"

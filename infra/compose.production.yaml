@@ -1,3 +1,5 @@
+name: thesos
+
 x-json-logging: &json-logging
   driver: json-file
   options:
@@ -7,10 +9,25 @@ x-json-logging: &json-logging
 x-runtime-environment: &runtime-environment
   THESOS_ENV: production
   THESOS_LOG_LEVEL: INFO
-  THESOS_WEB_ORIGIN: https://cephalonthesos.com
+  THESOS_WEB_ORIGIN: https://chat.cephalonthesos.com
   DATABASE_URL: "${DATABASE_URL:?Set DATABASE_URL}"
   DBOS_SYSTEM_DATABASE_URL: "${DBOS_SYSTEM_DATABASE_URL:?Set DBOS_SYSTEM_DATABASE_URL}"
   SESSION_COOKIE_SECURE: "true"
+  SESSION_DIGEST_KEY: "${SESSION_DIGEST_KEY:?Set SESSION_DIGEST_KEY}"
+  IP_HMAC_KEY: "${IP_HMAC_KEY:?Set IP_HMAC_KEY}"
+  ADMIN_MFA_ENCRYPTION_KEY: "${ADMIN_MFA_ENCRYPTION_KEY:?Set ADMIN_MFA_ENCRYPTION_KEY}"
+  TRUSTED_PROXY_CIDRS: '${TRUSTED_PROXY_CIDRS:-["172.16.0.0/12"]}'
+  PUBLIC_BASE_URL: https://chat.cephalonthesos.com
+  EMAIL_DELIVERY: resend
+  EMAIL_FROM: "${EMAIL_FROM:?Set EMAIL_FROM}"
+  RESEND_API_KEY: "${RESEND_API_KEY:?Set RESEND_API_KEY}"
+  TURNSTILE_SITE_KEY: "${TURNSTILE_SITE_KEY:?Set TURNSTILE_SITE_KEY}"
+  TURNSTILE_SECRET_KEY: "${TURNSTILE_SECRET_KEY:?Set TURNSTILE_SECRET_KEY}"
+  BASE_DAILY_RUN_LIMIT: ${BASE_DAILY_RUN_LIMIT:-10}
+  DEVICE_DAILY_RUN_LIMIT: ${DEVICE_DAILY_RUN_LIMIT:-10}
+  IP_DAILY_RUN_LIMIT: ${IP_DAILY_RUN_LIMIT:-10}
+  GLOBAL_DAILY_RUN_LIMIT: ${GLOBAL_DAILY_RUN_LIMIT:-100}
+  MAX_USER_CONCURRENT_RUNS: ${MAX_USER_CONCURRENT_RUNS:-2}
   DATABASE_POOL_SIZE: "4"
   DATABASE_MAX_OVERFLOW: "2"
   DBOS_DATABASE_POOL_SIZE: "5"
@@ -19,7 +36,7 @@ x-runtime-environment: &runtime-environment
   OPENROUTER_MODEL: "${OPENROUTER_MODEL:?Set OPENROUTER_MODEL}"
   OPENROUTER_FALLBACK_MODELS: '${OPENROUTER_FALLBACK_MODELS:?Set OPENROUTER_FALLBACK_MODELS}'
   OPENROUTER_ALLOW_PAID_MODELS: ${OPENROUTER_ALLOW_PAID_MODELS:-false}
-  OPENROUTER_APP_URL: https://cephalonthesos.com
+  OPENROUTER_APP_URL: https://chat.cephalonthesos.com
   OPENROUTER_APP_TITLE: Thesos Private Alpha
 
 services:
@@ -31,7 +48,7 @@ services:
       POSTGRES_USER: thesos
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - /srv/thesos/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U thesos -d thesos"]
       interval: 5s
@@ -124,17 +141,18 @@ services:
     image: ${THESOS_WEB_IMAGE:?Set THESOS_WEB_IMAGE}
     restart: unless-stopped
     environment:
-      THESOS_SITE_ADDRESS: ${THESOS_SITE_ADDRESS:-https://cephalonthesos.com}
+      THESOS_SITE_ADDRESS: ${THESOS_SITE_ADDRESS:-https://chat.cephalonthesos.com}
     depends_on:
       api:
         condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
-      - "443:443/udp"
     volumes:
       - caddy-data:/data
       - caddy-config:/config
+      - /etc/thesos/tls/origin-cert.pem:/etc/caddy/tls/origin-cert.pem:ro
+      - /etc/thesos/tls/origin-key.pem:/etc/caddy/tls/origin-key.pem:ro
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:2019/config/"]
       interval: 15s
@@ -151,12 +169,14 @@ services:
     profiles: ["operations"]
     environment:
       DATABASE_URL: ${DBOS_SYSTEM_DATABASE_URL:?Set DBOS_SYSTEM_DATABASE_URL}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-2}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?Set BACKUP_AGE_RECIPIENT}
+      BACKUP_MAX_LOCAL_BYTES: ${BACKUP_MAX_LOCAL_BYTES:-5368709120}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - postgres-backups:/backups
+      - /srv/thesos/backup-staging:/backups
     read_only: true
     tmpfs:
       - /tmp:size=64m
@@ -167,7 +187,5 @@ services:
     logging: *json-logging
 
 volumes:
-  postgres-data:
-  postgres-backups:
   caddy-data:
   caddy-config:

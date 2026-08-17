@@ -261,7 +261,12 @@ async def request_access(
         await consume_rate_limit("access_request", signal, limit=3, window_seconds=86_400)
     except RateLimitExceededError as error:
         raise _rate_limit_response(error) from error
-    if not await verify_turnstile(body.turnstile_token, raw_ip, settings=settings):
+    if not await verify_turnstile(
+        body.turnstile_token,
+        raw_ip,
+        expected_action="access-request",
+        settings=settings,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "challenge_required"},
