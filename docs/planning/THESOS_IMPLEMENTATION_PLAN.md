@@ -855,6 +855,11 @@ Semantic decisions use Pydantic models, including:
 
 Schema failures receive at most two model correction attempts. Repeated failure changes model or terminates gracefully; it never creates an unbounded retry loop.
 
+The immediately actionable design for skill discovery, scoped toolsets, provider capability
+negotiation, cache freshness, Warframe.market, deterministic calculations, persistence, and
+rollout is defined in `docs/planning/PHASE_3_5_AGENT_HARNESS.md`. That specification is the
+implementation authority for the harness introduced after Phase 3C.
+
 ## 10. Production Agent Loop
 
 ### 10.1 Control model
@@ -1874,6 +1879,74 @@ Exit gate:
 - Provider and global daily budgets can stop new generations without taking down login, account, legal, or admin status pages.
 - The first private-alpha week has an explicit user ceiling, provider-cost ceiling, and daily operator review.
 
+### Phase 3.5: Model-agnostic skill and tool harness
+
+Detailed implementation specification:
+`docs/planning/PHASE_3_5_AGENT_HARNESS.md`
+
+Objective: turn the hosted generic loop into a bounded, provider-neutral harness that can select
+trusted skills, expose only their permitted tools, execute them through application services,
+and preserve typed evidence without waiting for the Wiki corpus.
+
+Deliver:
+
+- Add Thesos-owned model capability, skill manifest, tool definition, tool-result, evidence,
+  budget, and provider-neutral stream contracts.
+- Add startup-validated skill and tool registries with progressive disclosure: compact candidate
+  metadata at routing time, then full instructions and a scoped toolset only after selection.
+- Define provider-neutral retrieval request, candidate, bundle, policy, evidence, and context-packing
+  contracts before the real Wiki corpus exists. Skills declare retrieval as `none`, required
+  prefetch, on-demand, or hybrid.
+- Use one evidence ledger and citation namespace for corpus retrieval and ordinary tool results.
+  Required archive retrieval happens deterministically before generation; focused follow-up
+  retrieval may be exposed as a bounded tool.
+- Add deterministic skill candidates plus a bounded structured model decision for ambiguous
+  requests. Controller policy validates skill, user, model, tool, freshness, and budget before
+  execution.
+- Put OpenRouter behind a logical `ModelGateway`, add direct Gemini as the portability proof,
+  and require a provider/model conformance suite before any profile can fill `tool_agent`.
+- Implement a bounded Pydantic AI tool loop with strict dispatch, typed arguments, correlated
+  results, duplicate/no-progress detection, shared budgets, cancellation, persistence, and
+  sanitized progress events.
+- Implement cache freshness, refresh leases, request coalescing, endpoint-aware rate limits,
+  circuit breakers, and service-owned PostgreSQL upserts. The model never writes cache data.
+- Deliver Warframe.market as the first complete vertical slice: v2 catalog sync, canonical item
+  resolution, current price lookup, local comparison, and category ranking without request-time
+  full-catalog fan-out.
+- Deliver the reviewed Riven dissolution formula as the first deterministic calculation skill,
+  including formula version, provenance, intermediate values, rounding, and regression fixtures.
+- Add encrypted credential-reference foundations for later BYOK without exposing the UI. Support
+  OpenAI through Platform API keys. Treat operator-owned Codex automation separately from BYOK,
+  and do not ask users to upload Codex client authentication caches.
+- Release behind feature and cohort flags through shadow selection, admin canary, and a small
+  allowlisted cohort while retaining the Phase 3 generic path as rollback.
+
+Database work:
+
+- Add skill/version, run-skill, agent-step, tool-call/result, evidence, and model-profile snapshot
+  records, including retrieval-pass identity and corpus revision references.
+- Add canonical market catalog, alias, category, observation, snapshot, revision, and refresh-state
+  records.
+- Add versioned mechanics/formula records or release-manifest references with immutable source and
+  fixture identity.
+- Keep ordinary chat content out of tool audit records and store large domain payloads by reference.
+
+Exit gate:
+
+- Tool and non-tool routing evaluations expose the expected scoped surface across OpenRouter and
+  direct Gemini.
+- Required, on-demand, hybrid, and prohibited retrieval policies pass fixture-based integration
+  tests, including a mixed corpus-plus-market run with stable citations and bounded context.
+- No model can call an unknown or unscoped tool, change its budget, or decide cache TTL and retry
+  policy.
+- Current-price refreshes update PostgreSQL through `MarketService`, concurrent identical refreshes
+  coalesce, and broad rankings do not fan out during a user's request.
+- Numerical results are deterministic and do not change when the answer model changes.
+- Provider and tool cancellation, DBOS recovery, duplicate suppression, safety, ownership, quotas,
+  redaction, and full operation correlation pass integration tests.
+- Canary metrics meet the agreed tool validity, unsupported-claim, latency, upstream traffic, and
+  cost thresholds before the harness becomes the default.
+
 ### Phase 4: Corpus ingestion and candidate retrieval
 
 Objective: build trustworthy evidence retrieval independently of answer generation.
@@ -1888,6 +1961,8 @@ Deliver:
 - Implement context packing and an internal retrieval inspection endpoint or admin view.
 - Publish indexes atomically with corpus revision manifests.
 - Build the initial retrieval evaluation dataset and report.
+- Register corpus/entity retrieval as deterministic services compatible with the Phase 3.5 tool
+  result and evidence contracts; do not expose them to the model yet.
 
 Database work:
 
@@ -1918,6 +1993,8 @@ Deliver:
 - Render citations, assumptions, warnings, and freshness in the frontend.
 - Add answer and retrieval caches keyed by corpus and policy versions.
 - Build factual, unsupported, stale, conflicting-source, and citation eval cases.
+- Add the `archive_answer` skill and its scoped retrieval tools to the Phase 3.5 registries rather
+  than creating a separate retrieval-agent protocol.
 
 Database work:
 
@@ -1933,12 +2010,14 @@ Exit gate:
 
 ### Phase 6: Production bounded agent controller
 
-Objective: introduce professional agentic behavior only after the grounded single-pass path is reliable.
+Objective: expand the Phase 3.5 bounded harness into a production controller for multi-step,
+evidence-driven behavior after the grounded single-pass path is reliable.
 
 Deliver:
 
-- Implement the closed, typed controller state machine.
-- Add intent assessment, workflow routing, and dynamic toolset selection.
+- Extend the closed, typed controller state machine established in Phase 3.5.
+- Extend intent assessment, workflow routing, and scoped toolset selection across retrieval and
+  multi-domain work.
 - Implement planner, plan validation, bounded step executor, evidence assessment, plan-tail revision, and clarification.
 - Enforce parent-shared model, token, tool, time, replan, and cost budgets.
 - Add canonical tool-call hashes, duplicate suppression, no-progress detection, and all terminal states.
@@ -1959,15 +2038,17 @@ Exit gate:
 
 ### Phase 7: Warframe domain tools and specialist workflows
 
-Objective: add useful agency through independently trustworthy, read-only domain capabilities.
+Objective: expand the proven Phase 3.5 domain patterns into the complete set of independently
+trustworthy, read-only Warframe capabilities.
 
 Deliver in this order:
 
 1. World-state and reset/rotation tools.
-2. Warframe.market read-only item and listing tools with respectful pacing and caching.
-3. Versioned mechanics and formula registry.
-4. Deterministic calculation engine.
-5. Build construction, validation, calculation, and comparison workflow.
+2. Broader Warframe.market listing, history, Riven, and comparison workflows on the existing
+   market service and pacing policy.
+3. Expand the versioned mechanics registry beyond the Phase 3.5 Riven formula.
+4. Expand the deterministic calculation engine across supported damage/build domains.
+5. Add build construction, validation, calculation, comparison, and synergy workflows.
 
 Each tool requires:
 
@@ -2151,7 +2232,8 @@ Every phase includes a forward migration, clean-database test, representative da
 5. Specify Warframe entity ontology and alias governance.
 6. Establish exact account, authentication, security-signal, temporary-content, and share-expiry periods in privacy copy.
 7. Define build-calculation scope for the first supported weapon and damage modes.
-8. Confirm Warframe.market API policies, caching, and endpoint rate limits before public tooling.
+8. Set measured Warframe.market endpoint budgets and cache TTLs from Phase 3.5 canary telemetry
+   while remaining below published policy limits.
 9. Set measured quick, standard, and research budgets from provider quotas and alpha traces.
 10. Choose the OpenTelemetry backend or local retention strategy without compromising privacy or free-tier goals.
 11. Confirm the initial admin email, tester allowlist, Resend account/sending subdomain, Cloudflare zone, OCI home region, and production GitHub environment before Phase 3C commissioning.
@@ -2177,6 +2259,19 @@ Every phase includes a forward migration, clean-database test, representative da
 - Pydantic Evals: <https://pydantic.dev/docs/ai/evals/evals/>
 - OpenRouter provider routing: <https://openrouter.ai/docs/guides/routing/provider-selection>
 - OpenRouter tool calling: <https://openrouter.ai/docs/guides/features/tool-calling>
+- OpenAI function calling: <https://developers.openai.com/api/docs/guides/function-calling>
+- OpenAI/Codex skills: <https://learn.chatgpt.com/docs/build-skills>
+- OpenAI Codex authentication: <https://learn.chatgpt.com/docs/auth>
+- OpenAI Codex SDK: <https://learn.chatgpt.com/docs/codex-sdk>
+- OpenAI Workspace Agent access tokens: <https://learn.chatgpt.com/workspace-agents/authentication>
+- OpenAI Codex source: <https://github.com/openai/codex>
+- Gemini function calling: <https://ai.google.dev/gemini-api/docs/function-calling>
+- Anthropic tool use: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works>
+- Mistral function calling: <https://docs.mistral.ai/studio-api/conversations/function-calling>
+- Pydantic AI RAG example: <https://ai.pydantic.dev/examples/rag/>
+- OpenAI retrieval guide: <https://developers.openai.com/api/docs/guides/retrieval>
+- Warframe.market API introduction: <https://docs.warframe.market/docs/intro/>
+- Warframe.market API rules: <https://docs.warframe.market/docs/rules/overview/>
 - React Router static pre-rendering: <https://reactrouter.com/how-to/pre-rendering>
 - BM25S: <https://github.com/xhluca/bm25s>
 - OWASP excessive agency guidance: <https://genai.owasp.org/llmrisk/llm062025-excessive-agency/>
